@@ -1,0 +1,444 @@
+# Evolução do Projeto CVM
+
+## Propósito deste Documento
+
+Registro cronológico de evolução do projeto para defesa em entrevistas:
+* Histórico de sessões de desenvolvimento
+* Contexto e motivação de cada implementação
+* Aprendizados técnicos não-óbvios acumulados
+
+**Template de sessão** (máximo 25 linhas):
+1. **Contexto**: 2-3 frases (o que motivou?)
+2. **Decisão**: Bullet com escolha + 1 frase de justificativa
+3. **Implementado**: Lista objetiva (3-5 itens)
+4. **Key Insight**: 1 aprendizado realmente importante
+
+---
+
+## 📅 05/08/2026 - Padronização de Formato: Notebooks em .py para Git Limpo
+
+### Contexto
+Projeto tinha notebooks em formatos mistos: alguns `.py` (Python Source), um `.ipynb` (Jupyter). Formato misto viola princípio básico de consistência. Mais importante: para portfólio técnico onde histórico git conta narrativa, `.ipynb` (JSON) polui diffs com metadata não-relevante (execution_count, outputs), tornando code review ilegível. Times que usam Databricks + CI padronizam em `.py` exatamente por isso: diff linha-por-linha, sem noise.
+
+### Decisões
+* **Padronizar TUDO em `.py`** → Converter apenas 1 arquivo inconsistente (menos trabalho, menos risco) vs manter 8 arquivos já validados em produção
+* **Justificativa git-first** → Metadados do workspace (data criação, execution_count) não aparecem no GitHub/portfólio; para audiência externa, só commits importam
+* **Atualizar `estrutura_notebooks.md`** → Substituir instrução `.ipynb` por `.py` com justificativa de diff limpo e padrão de mercado
+* **Documentar decisão** → Registrar contexto completo (o porquê de `.py` > `.ipynb` para portfólio) em vez de apenas "padronizar"
+
+### Implementado
+* Formato confirmado: 9 notebooks em `.py` (bronze: 101/102, silver: 201/202, apoio: 000/001/002/003/099)
+* Especificação `estrutura_notebooks.md` → Nova seção "Formato de Arquivo" com justificativa git + proibição de `.ipynb`
+* Documentação (README, arquitetura, evolucao) → Referências corrigidas para `.py` (estavam desatualizadas)
+
+### Key Insight
+Escolha de formato é decisão arquitetural, não detalhe técnico. `.ipynb` é superior para notebooks isolados (Jupyter, Colab), mas `.py` é superior para pipelines versionados. Razão: git não é ferramenta de backup, é ferramenta de narrativa — "quem lê esse diff entende o que mudou?". Metadata JSON responde errado. Para portfólio onde recrutador abre PRs pra avaliar evolução técnica, `.py` trabalha a favor; `.ipynb` trabalha contra. **Alerta pendente**: Histórico (27/07) registra falha `%run` + `.py` → antes de commitar, testar pipeline completo pra validar que `%run ./config_parametros` funciona ou confirmar se `exec(open())` é necessário.
+
+---
+
+## 📅 04/08/2026 - Padronização de Portabilidade: %run com Caminho Relativo
+
+### Contexto
+Todos os notebooks do pipeline carregavam `config_parametros.py` usando `open('/Workspace/Users/<user-email>/.../config_parametros.py') + exec()` com caminho absoluto hardcoded. Isso criava dois problemas críticos de portabilidade: (1) código quebra ao migrar para outro workspace/conta (novo e-mail = novo path), e (2) expõe identificação pessoal no código-fonte. Databricks fornece `%run` justamente para esse caso, com caminhos relativos que sobrevivem a mudanças de ambiente.
+
+### Decisões
+* **Substituir `open() + exec()` por `%run` com caminho relativo** → `%run ../04_apoio/config_parametros` (notebooks em bronze/silver) ou `%run ./config_parametros` (notebooks em apoio). Portabilidade total entre workspaces.
+* **Atualizar especificação `estrutura_notebooks.md`** → Adicionar regra explícita proibindo caminhos absolutos/e-mail para carregamento de módulos compartilhados.
+* **Corrigir `arquitetura.md`** → Seção "Importação de Módulos Python" reescrita com novo padrão e justificativa de portabilidade.
+
+### Implementado
+* 6 notebooks corrigidos:
+  - `101_cvm_dfp_dre.ipynb`, `102_cvm_dfp_bpa.py` (bronze)
+  - `201_cvm_dfp_dre.py`, `202_cvm_dfp_bpa.py` (silver)
+  - `000_orquestrador_pipeline.py`, `003_download_cvm_para_landing.py` (apoio)
+* Especificação `estrutura_notebooks.md` → Nova seção "Carregamento de Módulos Compartilhados" com padrão obrigatório e exemplos
+* Documentação `arquitetura.md` → Seções "Configuração Centralizada" e "Padrões de Desenvolvimento" atualizadas
+
+### Key Insight
+Portabilidade não é "feature opcional" — é requisito de código profissional. Hardcoded paths com e-mail revelam código escrito "só para funcionar aqui e agora", não pensado para reprodução/migração. Em portfólio técnico, recrutador enxerga isso imediatamente: "Esse código consegue rodar em outro ambiente, ou foi feito só pra screenshot?" Databricks oferece `%run` (namespace compartilhado, caminho relativo) exatamente pra isso — usar a ferramenta correta demonstra conhecimento de plataforma.
+
+---
+
+## 📅 31/07/2026 - Auditoria Externa: Correção de Defasagem Spec-vs-Código
+
+### Contexto
+Validação técnica por agente externo (Gemini) revelou **defasagem crítica entre documentação (nível sênior) e implementação (gaps em pontos-chave)**. Diagnóstico: 8 achados técnicos, 4 críticos ou médios. Mais importante que bugs individuais foi o insight de que "documentação polida sobre código com bugs júnior pode soar como texto gerado por IA descolado da prática". Esse gap exato seria o primeiro achado de um recrutador técnico em code review de portfólio.
+
+### Decisões
+* **Correção técnica imediata** → Atacar 4 achados críticos/médios prioritários antes de melhorias arquiteturais (Achados #1, #4, #6, #7)
+* **Confrontação técnica independente** → Validar fatos (o que está escrito no código) mas questionar severidades e interpretações do auditor
+* **Documentação honesta** → Registrar gap encontrado e corrigido (não esconder), princípio de que "honestidade sobre lacunas impressiona mais que polimento que esconde"
+* **Adiar melhorias da Fase 2** → Achados #2 (dedupe por VERSAO), #3 (idempotência fraca), #5 (Auto Loader) ficam para ponderação posterior
+
+### Implementado
+* **Achado #1** (conflito de tipo DDL × cast): DDL Silver alterado de `VERSAO STRING, CD_CVM STRING` para `VERSAO INT, CD_CVM INT` (notebooks 001, células 5-6). Alinhamento com casts aplicados na transformação Silver. Razão: consistência de schema, não policy ANSI (análise técnica refinada)
+* **Achado #7** (guardrail incompleto): `ST_CONTA_FIXA` adicionada em `COLUNAS_ESSENCIAIS_DRE` e `COLUNAS_ESSENCIAIS_BPA` (config_parametros.py). Coluna existia no DDL Bronze mas faltava no contrato de dados — risco de append failure ou coluna sempre NULL
+* **Achado #4** (detecção de atualizações morta): DDL da tabela de controle alterado de `last_modified_cvm STRING` para `TIMESTAMP` (notebook 002). Função `get_anos_com_atualizacao_cvm` corrigida com except mais específico (AnalysisException separado). Comparação `datetime > str` causava TypeError silencioso — recurso nunca funcionou desde implementação
+* **Achado #6** (count remanescente): `.count()` removido do notebook Bronze 101 (célula 6). Antipadrão que força materialização prematura, inconsistente com remoção anterior do Silver
+
+### Key Insight
+Auditoria externa antecipou exatamente o que recrutador técnico enxergaria em code review de portfólio. **Confrontar tecnicamente** (não aceitar passivamente) foi crítico: Achado #1 tinha razão certa mas explicação errada (não é policy ANSI, é consistência de schema); Achado #2 pode ser over-engineering se fonte não traz duplicatas; Achado #5 recomendava Auto Loader quando `spark.read.csv` resolve 90% sem complexidade de checkpoint. Validar fatos no código, questionar interpretações de impacto — auditor pode estar certo nos bugs mas errado nas severidades.
+
+---
+
+## 📅 03/08/2026 - Correção Estrutural: Bronze Idempotente (DELETE+APPEND)
+
+### Contexto
+Investigação revelou que Bronze acumulava duplicatas técnicas: 10 execuções do job = 10 cópias dos mesmos 30k registros (307k total), causando "Silver < Bronze" (30k vs 307k). Root cause: estratégia APPEND-ONLY sem validação. Primeira correção (validar `last_modified_cvm` antes de APPEND) era **pontual, não escalável** - gambiarra que dependia de "se tudo der certo". Usuário enfatizou: "Não fazer correções fora dos notebooks que são gambiarras para ruídos" e "criar código robusto e independente".
+
+### Decisões
+* **Bronze idempotente (DELETE WHERE ano + APPEND)** → Sempre 1 versão por ano, executar 10x = mesmo resultado. Sem dependência de validações externas, sem acúmulo de versões.
+* **Silver simplificada** → Guardrail único: Bronze tem dados? SIM → processa, NÃO → pula. Sem validar "perda de 95%" (problema da Bronze, não Silver).
+* **Window Function removida da Silver** → Bronze idempotente = sempre 1 versão, deduplicação desnecessária.
+* **Remover notebook separado de limpeza** → Gambiarra pontual. Bronze auto-corretiva elimina necessidade.
+* **Documentação completa seguindo protocolo** → Registrar mudança arquitetural em `evolucao_projeto.md` + atualizar `arquitetura.md`.
+
+### Implementado
+* **101_cvm_dfp_dre** (célula 5): DELETE WHERE ano + APPEND. `_versao_ingestao` fixo em 1. Sem validação de `last_modified_cvm`.
+* **102_cvm_dfp_bpa** (célula 5): Mesma lógica idempotente aplicada.
+* **201_cvm_dfp_dre** (célula 4): Guardrail único (Bronze tem dados?). Window Function removida.
+* **202_cvm_dfp_bpa** (célula 4): Mesma simplificação.
+* **Notebook 999 deletado**: Limpeza one-time era gambiarra. Idempotência resolve na origem.
+* **guardrails.md criado**: Documentação separada de validações Bronze/Silver (condições, fluxos, erros).
+* **arquitetura.md atualizado**: Seções Bronze/Silver refletem estratégia idempotente, referência a guardrails.md.
+* **README.md atualizado**: Árvore de diretórios + referência a guardrails.md.
+
+### Key Insight
+**Idempotência > Guardrails defensivos**. Validar "se arquivo mudou" é gambiarra - se bug introduzir duplicatas, ficam lá. DELETE WHERE ano + APPEND é **auto-corretivo**: bugs futuros não acumulam lixo, rodar 10x = rodar 1x. Simplicidade estrutural elimina necessidade de lógica defensiva. "Silver < Bronze" era sintoma de Bronze mal projetada, não problema da Silver.
+
+---
+
+## 📅 31/07/2026 - Limitação Delta Lake: ALTER COLUMN TYPE Não Suportado
+
+### Contexto
+Após corrigir DDL (INT/TIMESTAMP), tentamos aplicar schema migration via `ALTER TABLE ... ALTER COLUMN ... TYPE` para preservar metadados de criação (`created_time`, histórico Delta). Delta Lake rejeitou: `NOT_SUPPORTED_CHANGE_COLUMN`. Descobrimos que Delta Lake **não permite** mudar tipo de coluna existente (Parquet é imutável, requereria reescrever todos arquivos).
+
+### Decisões
+* **DROP + CREATE como única solução real** → Delta não suporta ALTER TYPE; CTAS (Create Table As Select) também cria nova tabela, perde metadados igualmente
+* **Tradeoff consciente: schema correto > metadados** → Para portfólio, código executável do zero (funciona em ambiente novo) é mais importante que preservar `created_time` de tabelas antigas
+* **Função de migration idempotente** → Adicionada `apply_schema_migration_if_needed()` no DDL que tenta ALTER (ambiente novo: falha silenciosamente, CREATE funciona; ambiente antigo: reporta limitação)
+* **Documentar limitação em código** → Comentários no notebook explicam que Delta não suporta ALTER TYPE, alinhando expectativas
+
+### Implementado
+* Notebook 001: Célula de migration adicionada (tenta ALTER TABLE, detecta NOT_SUPPORTED_CHANGE_COLUMN)
+* Drop manual: Tabelas Silver (201, 202) e Controle dropadas via SQL
+* Job re-executado: Tabelas recriadas com schema correto (VERSAO/CD_CVM INT, last_modified_cvm TIMESTAMP)
+* Dados preservados: Bronze intacta (276k DRE, 295k BPA), Silver reconstruída a partir de Bronze (30k DRE, 58k BPA)
+* Run 39472409661291: SUCCESS, schema validado via DESCRIBE TABLE
+
+### Key Insight
+Delta Lake tem limitação arquitetural real: ALTER COLUMN TYPE não suportado (Parquet subjacente é imutável). Única solução é DROP+CREATE ou CTAS, ambas perdem metadados de criação. **Tradeoff de engenharia**: em portfólio, priorizamos código executável do zero (CREATE TABLE IF NOT EXISTS com schema correto funciona em clone do repo) sobre preservação de `created_time` (relevante apenas em ambiente existente). Em produção real, faria DROP+CREATE em maintenance window documentado. Descoberta dessa limitação **demonstra conhecimento profundo de Delta** — não é SQL tradicional, tem restrições de storage layer.
+
+---
+
+## 📅 31/07/2026 - Compatibilidade Spark Connect: Refatoração para Serverless
+
+### Contexto
+Pipeline falhando em execuções 213094734019502 e 1119125202764371. Três problemas raiz identificados:
+1. Download para Landing Zone falhava com FileNotFoundError (Python open() não cria diretórios automaticamente)
+2. Notebooks Bronze/Silver BPA falhavam com TypeError: 'NoneType' object is not iterable (ANOS_PROCESSAR não inicializado)
+3. Restrições Spark Connect/Serverless bloqueiam acesso a filesystem local (/tmp)
+
+### Decisões
+* **Refatoração config_parametros.py** → ANOS_PROCESSAR não executa no import, função inicializar_anos_processar() com chamada explícita obrigatória
+* **Download compatível com Spark Connect** → os.makedirs() antes de open(), gravação direta em Volume UC sem /tmp intermediário
+* **Padrão de inicialização** → Todos notebooks devem chamar inicializar_anos_processar() após importar config
+
+### Implementado
+* config_parametros.py: Removida inicialização automática de ANOS_PROCESSAR, função inicializar_anos_processar() criada com lógica de override (env ou argumento explícito)
+* Notebook 003_download_cvm_para_landing: Adicionado os.makedirs(ano_path, exist_ok=True) antes de gravar arquivo, download testado e validado (5 anos, total ~51 MB)
+* Notebooks 102_cvm_dfp_bpa e 202_cvm_dfp_bpa: Adicionada chamada inicializar_anos_processar() após import de config
+* Todos notebooks testados: ANOS_PROCESSAR corretamente inicializado como [2021, 2022, 2023, 2024, 2026]
+
+### Key Insight
+Spark Connect (Serverless Compute) tem restrições arquiteturais reais - bloqueia acesso a filesystem local (/tmp, paths fora de /Workspace) com LocalFilesystemAccessDeniedException. APIs Python padrão (open(), os.makedirs()) funcionam perfeitamente com Unity Catalog Volumes quando usadas diretamente, sem staging intermediário em /tmp. Diferencial técnico: conhecer essas limitações e projetar código que funciona nativamente no regime Serverless, não apenas "adaptar código antigo".
+
+---
+
+## 📅 27/07/2026 - Padronização de Numeração: Conformidade com Especificações
+
+### Contexto
+Auditoria da pasta `04_apoio/` revelou numeração inconsistente: dois notebooks iniciando com `000_` (viola unicidade), uso de `999_` em vez do padrão de 3 dígitos para utilitários (`099_`), e documentação mencionando arquivos `.sql` inexistentes. Segundo `/especificacoes/nomenclaturas.md`, notebooks devem usar SEMPRE 3 dígitos obrigatórios (`XXX_`) com numeração sequencial única.
+
+### Decisões
+* **Padronização em 3 dígitos** → Todos os notebooks seguem `XXX_[nome_base]`, eliminando duplicidades e garantindo ordem lógica clara
+* **Exclusão de config_parametros.py da numeração** → Arquivo de configuração/biblioteca não é notebook sequencial, não recebe número (padrão Python: utils.py, config.py sem numeração)
+* **Atualização em cascata** → 8 arquivos impactados: 4 docs (README, arquitetura, evolucao_projeto, referencia_ids), 1 job (4 tasks), 3 notebooks (orquestrador + 2 bronze com comentários)
+
+### Implementado
+* Notebooks renomeados:
+  - `000_ddl_create_tables` → `001_ddl_create_tables`
+  - `001_ddl_controle_ingestao` → `002_ddl_controle_ingestao`
+  - `002_download_cvm_para_landing` → `003_download_cvm_para_landing`
+  - `999_ddl_table_comments` → `099_ddl_table_comments`
+* Documentação atualizada: README.md, arquitetura.md, referencia_ids.md (duplicidade resolvida)
+* Job 661897477878521: 4 tasks atualizadas com novos paths
+* Código atualizado: orquestrador (print de log), notebooks bronze 101/102 (comentários)
+* Estrutura final: `000_orquestrador` (coordenador), `001/002/003` (setup/ingestão sequencial), `099` (utilitário docs), `config_parametros.py` (sem número)
+
+### Key Insight
+Padronização de nomenclatura não é cosmética — elimina ambiguidade operacional (qual `000_` executar primeiro?), força ordem lógica visível, e demonstra maturidade profissional em portfólio. Inconsistências se propagam: 1 renomeação impactou 8 arquivos (docs + job + código). Auditorias periódicas de conformidade com `/especificacoes/` previnem débito técnico documental.
+
+---
+
+## 📅 27/07/2026 - Guardrails de Qualidade: Pipeline Robusto a Mudanças de Schema
+
+### Contexto
+20 execuções consecutivas falharam por mismatches de schema entre fonte CVM e DDL Bronze/Silver. Bugs incluíam: colunas extras não declaradas, colunas esperadas ausentes (DT_INI_EXERC em BPA), metadados técnicos com nomes incorretos (_ingest_date vs _ingest_ts), e performance degradada por counts forçando full table scans (Silver DRE levava 316s).
+
+### Decisões
+* **Guardrails de schema via validação + projeção** → Bronze valida entrada (`validar_e_projetar_schema()`) e rejeita schemas incompatíveis; Silver projeta explicitamente colunas do DDL (`.select()`), descartando extras
+* **Contrato de dados explícito** → Listas `COLUNAS_ESSENCIAIS_DRE` e `COLUNAS_ESSENCIAIS_BPA` em `config_parametros.py` definem schema mínimo esperado
+* **Schema BPA ajustado** → BPA não contém `DT_INI_EXERC` (snapshot de posição, não período como DRE). DDL Bronze/Silver BPA atualizados, tabelas recriadas
+* **Remoção de counts informativos** → Eliminados 3 `.count()` em Silver DRE/BPA (logs sem propósito funcional)
+* **Correção de metadados** → Notebook de comentários documentava coluna inexistente `_ingest_date`; corrigido para metadados reais (`_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts`, `_source_file`)
+
+### Implementado
+* Guardrails implementados (detalhes em [guardrails.md](00_documentacao/tecnica/guardrails.md)): Função `validar_e_projetar_schema()` em `config_parametros.py`, aplicada em Bronze 101/102, projeção explícita em Silver 201/202
+* Schema BPA: Coluna `DT_INI_EXERC` removida de listas, DDL Bronze (cellId: 3a1d99ba), DDL Silver (cellId: 2ec17487), notebook 202
+* Notebook 999: Corrigido `_ingest_date` → metadados corretos, descrição de processamento corrigida ("APPEND incremental" não "TRUNCATE + APPEND")
+* Job: Path do notebook de comentários corrigido (99 → 999)
+
+### Key Insight
+Guardrails (ver [guardrails.md](00_documentacao/tecnica/guardrails.md)) detectam mudanças de fonte automaticamente. Counts desnecessários são antipadrão: Silver DRE de 316s → 15s (-95%, 21x) apenas removendo logs informativos sem propósito funcional.
+
+---
+
+## 📅 27/07/2026 - Correção: Compatibilidade de Namespaces em Databricks
+
+### Contexto
+Jobs falhavam com erros de parsing em notebooks bronze (101, 102) e erro de FileNotFoundError no notebook de download (002). Células Python com `%run` + imports não funcionam; tentativas de usar `os.makedirs()` em Volumes UC geraram "Operation not supported".
+
+### Decisões
+* **Migração de %run para exec(open())** → `%run` só funciona com `.ipynb`, não com `.py`. Solução: `exec(open('<caminho-absoluto>/config_parametros.py').read())`
+* **Uso exclusivo de dbutils.fs para Volumes UC** → `os.makedirs()` não é suportado em `/dbfs/Volumes/`. Usar apenas `dbutils.fs.mkdirs()` para criar diretórios
+* **Simplificação de versionamento** → Removida lógica complexa de versionamento de arquivos; arquivos sobrescritos quando necessário
+* **Namespace dual em Volumes** → Databricks expõe Volumes em dois namespaces: `/Volumes/` (dbutils.fs) e `/dbfs/Volumes/` (Python I/O)
+
+### Implementado
+* Notebooks 101 e 102: Corrigidas células de importação (tipo `run` → `python`, `%run` → `exec(open())`)
+* Notebook 002: Removido `os.makedirs()`, simplificado fluxo de criação de diretórios e versionamento
+* Importação de config: 3 notebooks ajustados com padrão `exec(open())`
+
+### Key Insight
+Databricks tem dois namespaces para Unity Catalog Volumes: `/Volumes/` (usado por dbutils.fs) e `/dbfs/Volumes/` (usado por Python built-in como open()). Operações de sistema de arquivos (mkdir, ls) devem usar dbutils.fs; operações de I/O (read/write) usam Python com `/dbfs/` prefix. Misturar namespaces ou usar módulos OS padrão (os.makedirs, shutil) resulta em "Operation not supported".
+
+---
+
+## 📅 27/07/2026 - Refatoração: Aplicação Rigorosa de DRY na Documentação
+
+### Contexto
+README.md e arquitetura.md continham 5 seções duplicadas (camadas Medallão, Landing Zone, convenções de numeração, princípio DRY, estrutura de notebooks). Violação clara do princípio DRY aplicado ao código mas não à documentação. Causa raiz identificada: protocolo_atualizacao.md instruía explicitamente a colocar detalhes técnicos no README.
+
+### Decisões
+* **README como índice executivo** → Visão geral (105 linhas), estrutura, status alto nível, links para arquitetura.md
+* **arquitetura.md como fonte única técnica** → TODOS os detalhes (camadas, schemas, convenções, estratégias, pipeline)
+* **Correção do protocolo** → protocolo_atualizacao.md agora exige separação clara e exemplifica README (simples) vs arquitetura.md (detalhado)
+* **Regra absoluta** → Se está em arquitetura.md, NÃO está em README.md (exceto link/referência)
+
+### Implementado
+* README.md: Redução de 170 → 105 linhas (38%), remoção de 5 seções duplicadas, nova seção "Documentação Técnica" com links
+* protocolo_atualizacao.md: Nova seção "Princípio DRY na Documentação", instruções corrigidas em 8 cenários, exemplos práticos README vs arquitetura.md
+* Zero informação perdida (tudo duplicado já existia em arquitetura.md)
+
+### Key Insight
+Protocolo de documentação é código que gera documentação. Se o protocolo não aplica DRY rigorosamente, gerações futuras vão duplicar informações independente da boa intenção. Meta-documentação (protocolo) precisa de revisão tão crítica quanto código de produção.
+
+---
+
+## 📅 23/07/2026 - Implementação Final de Padrões Arquiteturais
+
+### Contexto
+Notebooks Bronze e Silver tinham gaps críticos vs. padrões definidos anteriormente: download direto da CVM (ignorando Landing Zone), ausência de filtro de versionamento em Silver, estratégias incorretas de gravação (TRUNCATE, DELETE sem critério), e configuração descentral izada.
+
+### Decisões
+* **Landing Zone como origem única** → Bronze lê de UC Volume, nunca baixa diretamente (separação ingestão/transformação)
+* **Versionamento append-only em Bronze** → Colunas `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts` + APPEND puro (histórico completo)
+* **Filtro de versionamento em Silver** → Window Function (PARTITION BY chave natural, ORDER BY _versao_ingestao DESC, ROW_NUMBER = 1)
+* **DELETE WHERE + APPEND em Silver** → Idempotência por período (ano), preserva dados de outros anos
+* **Config centralizada obrigatória** → `%run config_parametros` em TODOS notebooks (DRY global)
+* **Tabela de controle** → Registro de todas ingestões (fonte, ano, versão, timestamp, status)
+
+### Implementado
+* Notebooks 101/102 (Bronze DRE/BPA): Loop ANOS_PROCESSAR, leitura landing zone, append-only, registro controle
+* Notebook 201 (Silver DRE): Filtro versionamento + DELETE WHERE + APPEND, remove colunas técnicas Bronze
+* Notebook 202 (Silver BPA): Criado com padrão idêntico ao 201
+* config_parametros.py: Corrigido TABELA_CONTROLE, URLs, status='SUCCESS'
+
+### Key Insight
+Versionamento é decisão arquitetural binária: ou Bronze é append-only + Silver filtra versão mais recente, OU Bronze é idempotente + Silver confia. Misturar quebra rastreabilidade e audit trail. Não existe "meio-termo".
+
+---
+
+## 📅 14/07/2026 - Governança de Dados: DDL Explícito
+
+### Contexto
+`saveAsTable()` com inferência automática não demonstra controle sobre governança. Para portfólio bancário, é essencial demonstrar separação entre infraestrutura (DDL) e transformações (DML).
+
+### Decisão
+* **Pasta `04_apoio/`** para scripts de infraestrutura → Separa DDL (estruturas) de notebooks (transformações)
+* **DDL explícito** (`00_ddl_create_tables.sql`) → Define schemas, tipos e particionamento antes da carga
+* **Metadados** (`099_ddl_table_comments.py`) → COMMENT ON TABLE/COLUMN no catálogo (data discovery)
+* **INSERT ao invés de saveAsTable** → Tabelas já existem, apenas populamos dados
+
+### Implementado
+* Pasta `04_apoio/` com 2 arquivos SQL (criação + documentação)
+* DDL: 3 schemas + 2 tabelas (bronze 14 cols, silver 18 cols) + comentários
+* Notebooks 101 e 201: `createOrReplaceTempView()` + `INSERT OVERWRITE TABLE`
+* README atualizado com nova estrutura
+
+### Key Insight
+DDL explícito é padrão corporativo - demonstra que você projeta estruturas antes de popular dados, não deixa o Spark inferir e "torce para dar certo".
+
+---
+
+## 📅 14/07/2026 - Refatoração DRY: Nomenclatura de DataFrames
+
+### Contexto
+Notebook 201 violava princípio DRY com prefixos redundantes (`df_dre_bronze`, `df_dre_tipos_padronizados`). Nome do notebook já comunica camada e domínio.
+
+### Decisão
+* **Remover prefixos redundantes** → `df → df_padronizado → df_sem_duplicados → df_limpo → df_final`
+* Nomenclatura descreve **transformação/estado**, não contexto já estabelecido pelo nome do notebook
+* Comentários simplificados (de 4-5 linhas para 2 linhas por célula)
+
+### Implementado
+* Refatoradas 9 células do notebook 201
+* Aplicado princípio DRY em todos DataFrames
+* Comentários reduzidos mantendo clareza técnica
+
+### Key Insight
+DRY não é só código - aplica-se a nomenclatura e semântica. Nomenclatura autocontida ≠ nomenclatura redundante.
+
+---
+
+## 📅 14/07/2026 - Processamento Incremental: DELETE + APPEND (Bronze)
+
+### Contexto
+INSERT OVERWRITE deleta TODO o histórico a cada execução, inclusive anos anteriores. Ineficiente e arriscado para produção.
+
+### Decisão
+* **Bronze**: `DELETE WHERE ANO_REFER = X` + `APPEND` → Preserva histórico, reprocessa só o ano
+* **Coluna ANO_REFER** extraída de DT_REFER → Usada para particionamento físico
+* **Particionamento** `PARTITIONED BY (ANO_REFER)` → DELETE eficiente (só processa partição específica)
+* Fonte CVM fornece ZIPs por ano → Alinhamento natural com estratégia incremental
+
+### Implementado
+* DDL: Adicionada coluna `ANO_REFER INT` + `PARTITIONED BY (ANO_REFER)` na bronze
+* Notebook 101: `withColumn("ANO_REFER", year(...))` + DELETE condicional + append
+* Silver também particionada por ANO (já tinha a coluna)
+
+### Key Insight
+Bronze usa DELETE+APPEND para snapshots completos por período. Se fonte fornece dados por partições naturais (ano/mês/dia), DELETE+APPEND é mais simples que MERGE e igualmente eficiente.
+
+---
+
+## 📅 14/07/2026 - MERGE Incremental (Silver)
+
+### Contexto
+Silver precisa capturar correções da fonte (CVM pode republicar DFPs corrigidos). DELETE+APPEND deleta toda partição; MERGE atualiza seletivamente.
+
+### Decisão
+* **MERGE com chave natural** `CNPJ_CIA + DT_REFER + CD_CONTA + ANO` → Atualiza existentes + insere novos
+* **Incluir ANO no ON** → Otimiza MERGE (só processa partição específica)
+* `UPDATE SET *` e `INSERT *` → Simplicidade (schema já validado no DDL)
+
+### Implementado
+* Notebook 201: Substituído INSERT OVERWRITE por MERGE INTO
+* Chave composta identifica unicamente cada linha contábil da DRE
+* Operação atômica (UPDATE + INSERT em uma transação)
+
+### Key Insight
+Escolha consciente por camada: Bronze snapshot (DELETE+APPEND), Silver transformado (MERGE). MERGE não é "sempre melhor" - cada padrão tem seu caso de uso ideal.
+
+---
+
+## 📅 22/07/2026 - Landing Zone e Preservação de Arquivos Originais
+
+### Contexto
+Bronze depende de fonte externa (CVM) estar sempre disponível para reprocessamentos. APIs instabilidades ou indisponibilidade impedem reconstruir pipeline. Compliance pode exigir arquivo original preservado.
+
+### Decisão
+* **Landing Zone em UC Volume** → `/Volumes/main/proj_cvm/landing/dfp/` preserva ZIPs originais
+* **Metadados HTTP** → Arquivo `_metadata.json` por ano (Last-Modified, URL, tamanho)
+* **Versionamento de arquivos** → Se CVM atualiza arquivo histórico, nova versão preservada (`.v<timestamp>`)
+* **Bronze lê de Landing** → Não mais download direto da URL
+
+### Implementado
+* Notebook `003_download_cvm_para_landing.py` → Download + metadados + versionamento
+* Estrutura: `/landing/dfp/2020/arquivo.zip` + `_metadata.json`
+* Bronze ajustado para ler de Volume ao invés de URL
+* Detecção automática de arquivos atualizados (compara Last-Modified)
+
+### Key Insight
+Landing Zone duplica storage mas elimina dependência de fonte externa em reprocessamentos. Crítico para ambientes regulatórios onde arquivo original é evidência.
+
+---
+
+## 📅 22/07/2026 - Versionamento em Bronze: Append-Only com Metadados
+
+### Contexto
+CVM pode republicar DFPs corrigidos anos depois. DELETE WHERE destrói auditoria ("quando a fonte corrigiu?"). Bronze precisa preservar histórico completo de ingestões.
+
+### Decisão
+* **Append-only em Bronze** → Nunca DELETE, sempre APPEND
+* **Colunas de metadados**: `_versao_ingestao` (int crescente), `_last_modified_cvm` (timestamp fonte)
+* **Silver filtra versão mais recente** → Window Function `row_number().over(Window.partitionBy("ano").orderBy(col("_versao_ingestao").desc())) == 1`
+* **Tabela de controle** → `000_controle_ingestao` rastreia cada execução
+
+### Implementado
+* Bronze: colunas `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts` + APPEND
+* Silver: Window Function filtra apenas versão mais recente por período
+* Tabela `proj_cvm_01_bronze.000_controle_ingestao` (fonte, ano, URL, status)
+* Notebook `002_ddl_controle_ingestao.py` cria estrutura de controle
+
+### Key Insight
+Append-only em Bronze é mais simples que MERGE e preserva auditoria completa. Silver resolve conflito de versões via query (filtro), não via DELETE. Permite comparar "versão publicada em 2020" vs "versão corrigida em 2024".
+
+---
+
+## 📅 22/07/2026 - Orquestrador Pipeline: Detecção Inteligente de Períodos
+
+### Contexto
+Pipeline processa anos fixos (hardcoded). Não detecta novos anos da CVM nem arquivos atualizados. Requer intervenção manual para adicionar anos.
+
+### Decisão
+* **Orquestrador (pre-flight check)** → Notebook `000_orquestrador_pipeline.py` define `ANOS_PROCESSAR` dinamicamente
+* **Detecção automática**:
+  - Consulta tabela de controle (o que já foi processado?)
+  - Verifica metadados HTTP de cada ano (Last-Modified)
+  - Compara: arquivo CVM mais recente que última ingestão?
+* **Override manual** → Widget permite forçar anos específicos
+* **Exporta variável** → `ANOS_PROCESSAR` disponível via `%run ./config_parametros`
+
+### Implementado
+* Notebook `000_orquestrador_pipeline.py` com lógica de detecção
+* Função `get_anos_para_processar_inteligente()` em `config_parametros.py`
+* Widget `anos_override` para forçar reprocessamento
+* Notebooks downstream importam `ANOS_PROCESSAR` via `%run`
+
+### Key Insight
+Orquestrador é pre-flight check que elimina intervenção manual. Pipeline "acorda" sozinho quando CVM publica novo ano ou corrige arquivo histórico. Padrão maduro de observabilidade.
+
+---
+
+## 📅 22/07/2026 - Estratégias de Gravação por Cenário
+
+### Contexto
+Cada camada tem padrão de atualização diferente. Bronze append-only, Silver/Gold por período. DELETE+APPEND vs MERGE vs replaceWhere — qual usar?
+
+### Decisão
+* **Bronze**: Sempre APPEND (preserva histórico)
+* **Silver/Gold batch periódico**: DELETE WHERE + APPEND (simples, idempotente)
+* **Silver/Gold streaming**: MERGE (CDC, atualizações por registro)
+* **replaceWhere**: Quando quer atomicidade (partição substituida em transação única)
+
+### Implementado
+* Bronze: `mode("append")` sempre
+* Silver DRE: `DELETE FROM ... WHERE ano IN (...)` + `mode("append")`
+* Documentado critérios de escolha por cenário
+* Evita antipadrão: APPEND sem dedupe em Silver/Gold
+
+### Key Insight
+Não existe "estratégia sempre melhor". DELETE+APPEND é mais simples que MERGE para batch periódico. MERGE é essencial para streaming/CDC. Escolha consciente por camada demonstra maturidade.
+

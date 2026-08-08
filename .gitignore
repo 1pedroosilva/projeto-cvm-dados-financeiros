@@ -1,0 +1,29 @@
+# Backups e arquivos temporários
+_backup*/
+_old/
+_temp/
+
+# Databricks
+.ipynb_checkpoints/
+*.pyc
+__pycache__/
+
+# Dados locais
+data/
+*.csv
+*.parquet
+*.zip
+
+# Configurações pessoais
+.env
+config_local.py
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema
+.DS_Store
+Thumbs.db
