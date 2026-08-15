@@ -15,6 +15,128 @@ Registro cronológico de evolução do projeto para defesa em entrevistas:
 
 ---
 
+## 📅 15/08/2026 - Separação Arquitetural: Skills como Projeto Independente
+
+### Contexto
+Projeto CVM cresceu com frameworks técnicos reutilizáveis (nomenclaturas, estrutura notebooks, revisão código 4 frentes, resiliência operacional, arquitetura medalhão, Unity Catalog, protocolo atualização) armazenados em `.agent_instructions/` local. Problema: **skills são padrões universais de mercado (Tipo 1 - Conceitual)**, não implementação específica do CVM (Tipo 2 - Projeto). Acoplamento viola princípio de separação de contexto: frameworks entre projetos não devem estar presos a um único projeto.
+
+### Decisões
+* **Criar projeto `databricks-genie-skills`** → Projeto de portfólio dedicado demonstrando investigação técnica (troubleshooting do Skill Registry, análise de causa raiz) + frameworks reutilizáveis
+* **Mover skills para `/Users/<user>/.assistant/skills/`** → Source única, disponível globalmente para todos os projetos no workspace
+* **Limpar CVM de skills locais** → `.agent_instructions/` movida para `_old/` (histórico, não versionada no Git)
+* **Atualizar documentação CVM** → Remover referências a skills locais, adicionar ponteiro para databricks-genie-skills como fonte de padrões técnicos
+
+### Implementado
+* Projeto `databricks-genie-skills` criado:
+  - README.md (ID: 4368132372133209) com visão geral, investigação técnica completa (INVESTIGATION_LOG.md)
+  - 7 skills em `.assistant/skills/`: nomenclaturas, estrutura-notebooks, resiliencia-operacional, revisao-codigo-quatro-frentes, unity-catalog, protocolo-atualizacao, escolha-sql-pyspark
+  - Decisões arquiteturais em `.project/decisoes.md` (ID: 1929315116616197, não versionado)
+* Documentação CVM atualizada:
+  - `evolucao_projeto.md`: Entrada cronológica registrando separação
+  - `README.md`: Removidas referências a `.agent_instructions/` local
+  - `arquitetura.md`: Atualizado para apontar databricks-genie-skills como fonte de padrões
+* `.agent_instructions/` movida para `_old/.agent_instructions/` (já estava no .gitignore)
+
+### Key Insight
+Separação de contexto não é organização de pastas — é **arquitetura de conhecimento**. Skills (Tipo 1 - Conceitual) são frameworks universais, devem ser fonte única entre projetos; implementações específicas (Tipo 2 - Projeto) evoluem com cada projeto; histórico de decisões (Tipo 3 - Operacional) documenta o porquê. Acoplar skills ao CVM criava dependência artificial: próximo projeto precisaria duplicar skills ou importar pasta de outro projeto. Separação permite reutilização limpa e posiciona skills como deliverable independente de portfólio (demonstra capacidade de criar frameworks, não apenas consumir).
+
+---
+
+## 📅 10/08/2026 - Expansão de Demonstrações: BPP (Balanço Patrimonial Passivo)
+
+### Contexto
+Após implementação bem-sucedida de DRE (101/201) e BPA (102/202), expansão natural do pipeline para incluir BPP (Balanço Patrimonial Passivo). BPP é a terceira demonstração financeira essencial da CVM (junto com DRE e BPA), completando a visão do Balanço Patrimonial (Ativo + Passivo). Fonte CVM fornece arquivo único com múltiplas demonstrações - mesma estrutura de ingestão se aplica a BPP.
+
+### Decisões
+* **Criar notebooks 103/203 BPP** → Seguindo padrão de rastreabilidade estabelecido (103 Bronze, 203 Silver) e nome base idêntico entre camadas
+* **Replicar estrutura BPA** → BPP tem estrutura análoga ao BPA (demonstração de posição patrimonial), adaptação direta do padrão já validado
+* **Manter consistência de pipeline** → Mesmas validações, logging estruturado e tratamento de erros granular aplicados em DRE/BPA
+
+### Implementado
+* Notebooks criados:
+  - `103_cvm_dfp_bpp` (Bronze, ID: 2152724235953208) → Tabela `proj_cvm_01_bronze.103_bpp_dfp`
+  - `203_cvm_dfp_bpp` (Silver, ID: 2152724235953207) → Tabela `proj_cvm_02_silver.203_bpp_dfp`
+* Estrutura técnica implementada:
+  - Bronze: Ingestão idempotente (DELETE WHERE ano + APPEND), versionamento (_versao_ingestao, _last_modified_cvm, _ingest_ts)
+  - Silver: Filtro de versão mais recente, transformações de tipo, DELETE WHERE ano + APPEND
+  - Logging estruturado por ano, try/except granular (falha isolada), validação de pré-requisitos
+* Documentação atualizada: README.md (estrutura + status), arquitetura.md (tabelas Bronze/Silver)
+
+### Key Insight
+Padrão de rastreabilidade (101→201, 102→202, 103→203) permite identificação visual imediata do fluxo entre camadas: mudança de primeiro dígito indica camada, nome base idêntico garante relacionamento. Expansão de demonstrações segue estrutura modular - cada nova demonstração replica padrão sem reinventar arquitetura.
+
+---
+
+## 📅 09/08/2026 - Reestruturação de Pastas: Ordem Lógica EDA antes de Apoio
+
+### Contexto
+Decisão de implementar BPP (Balanço Patrimonial Passivo) antes de EDA (Exploratory Data Analysis - Análise Exploratória de Dados) revelou necessidade de pasta dedicada para análises exploratórias. Estrutura original tinha `04_apoio/` logo após camadas medalhão, mas análises exploratórias fazem parte do **fluxo de dados** (dados → exploração → decisão), enquanto apoio é infraestrutura auxiliar. Numeração de pastas deve refletir ordem cronológica: análises acontecem depois dos dados (01/02/03) mas antes da infraestrutura (DDL, orquestrador, config).
+
+### Decisões
+* **Criar `04_analises_exploratorias/`** → Pasta para notebooks de EDA (um por fonte: eda_dre, eda_bpa, eda_bpp + notebook de análises cruzadas)
+* **Renomear `04_apoio/` → `05_apoio/`** → Infraestrutura vem depois do fluxo de dados na ordenação lógica
+* **Atualizar todas as referências** → Paths `%run` e tasks de Jobs orquestradores devem refletir nova numeração
+
+### Implementado
+* Pasta `04_analises_exploratorias/` criada
+* Pasta `04_apoio/` renomeada para `05_apoio/`
+* Notebooks 101, 102, 201, 202: Paths `%run ../04_apoio/config_parametros` → `../05_apoio/config_parametros` atualizados
+* Job 661897477878521 (Pipeline CVM - DFP): 5 tasks atualizadas (orquestrador, DDL, download, table_comments apontando para `05_apoio/`)
+* Documentação atualizada: `arquitetura.md` (seção Pastas + 11 referências), `README.md` (árvore de diretórios)
+
+### Key Insight
+Numeração de pastas não é cosmética — comunica visualmente a sequência lógica do pipeline. Colocar "apoio" (infraestrutura) antes de "análises exploratórias" (fluxo de dados) inverte a ordem conceitual. Reestruturação teve impacto cascata: 4 notebooks + 1 job + 2 docs. Auditar impactos ANTES de renomear (via `grep -r` + checklist de assets afetados) evita quebras silenciosas em execução.
+
+---
+
+## 📅 08/08/2026 - Correção de Parsing: Células language: run vs python
+
+### Contexto
+Após resolução do erro OSError no `%run ./config_parametros`, pipeline falhou novamente em runs 947286305660001 e 429215309554501. Novo erro diferente: `"Failed to parse %run command: string matching regex expected but '#' found"` nos notebooks Bronze (101_cvm_dfp_dre, 102_cvm_dfp_bpa). Causa raiz: células com `language: run` contendo código Python adicional após o comando `%run`. Databricks rejeita isso — células `run` aceitam APENAS o comando `%run`, nada mais (nem comentários). Progresso importante: task `download_cvm_landing` PASSOU pela primeira vez, confirmando que a correção anterior de path relativo estava correta.
+
+### Decisões
+* **Mudar células para `language: python`** → Quando célula tem `%run` + código Python adicional, tipo correto é `python` (não `run`)
+* **Fallback robusto em ANOS_PROCESSAR** → Se detecção inteligente retornar lista vazia ou falhar, usar automaticamente últimos 5 anos (fallback de 2021-2026). Pipeline nunca falha por falta de anos.
+* **Logs detalhados de inicialização** → Adicionar try/except + logs explícitos na detecção de anos para diagnosticar futuros problemas silenciosos
+
+### Implementado
+* Notebooks 101_cvm_dfp_dre e 102_cvm_dfp_bpa: Células de configuração mudadas de `language: run` para `language: python`
+* Notebook 003_download_cvm_para_landing: Implementado fallback automático (últimos 5 anos) + logs detalhados de inicialização
+* Primeira execução bem-sucedida de `download_cvm_landing` confirmada (run 429215309554501: DDL passou, download passou, Bronze falhou apenas por erro de parse)
+
+### Key Insight
+Células `language: run` são restritas — aceitam SOMENTE o comando `%run`, nenhum código adicional (nem comentários, nem imports, nem lógica). Para misturar `%run` com código Python, usar `language: python` que aceita magic commands. Databricks é estrito nisso porque células `run` são otimizadas para execução pura de notebook externo. Fallback robusto elimina classes de falha: pipeline sempre tem anos para processar, mesmo se detecção inteligente falhar silenciosamente (try/except que engole erro, tabela de controle inacessível, etc). Logs detalhados expõem problemas antes que virem falha de execução.
+
+---
+
+## 📅 08/08/2026 - Preparação Git: Documentação Portável e Anonimizada
+
+### Contexto
+Projeto pronto para versionamento público no GitHub após meses de desenvolvimento. Última etapa crítica antes do commit inicial: validação profunda de TODA a documentação para garantir portabilidade total e zero vazamento de informação pessoal. Documentação técnica polida é inútil se expõe caminhos do workspace ou identificação pessoal — recrutador vê isso como "código feito só pra screenshot", não pensado para reprodução.
+
+### Decisões
+* **Auditoria completa de referências** → Validar cada link, cada caminho, cada ID em todos os arquivos de documentação antes do commit irreversível
+* **Anonimização de caminhos Databricks** → Substituir `/Workspace/Users/1pedro.osilva@gmail.com/...` por placeholders genéricos (`<user-email>`, `<caminho-absoluto>`)
+* **Caminhos relativos nas especificações** → `/instrucoes/` (caminho absoluto workspace) → `.agent_instructions/` (caminho relativo Git)
+* **Remoção de links internos Databricks** → Âncoras `#file-XXXXXX` não funcionam fora do workspace, substituir por referências textuais
+* **Consistência de nomenclatura** → Nome da pasta mudou de underscore para hífen (`projeto_cvm_dados_financeiros` → `projeto-cvm-dados-financeiros`), corrigir em toda documentação
+
+### Implementado
+* **11 correções em 8 arquivos**:
+  - 5 rodapés em `.agent_instructions/` (escolha_sql_pyspark, estrutura_notebooks, nomenclaturas, unity_catalog, protocolo_atualizacao)
+  - 1 checklist interno (protocolo_atualizacao linha 197)
+  - 4 caminhos absolutos anonimizados (evolucao_projeto × 2, arquitetura × 2)
+  - 1 link morto removido (arquitetura linha 579: `#file-186477256358021`)
+  - 2 nomes de pasta corrigidos (README, referencia_ids)
+* **Validação final**: 0 referências a `/Users/1pedro`, 0 referências a `/instrucoes/`, 0 links internos Databricks
+* **Commit inicial e push**: 25 arquivos limpos publicados no GitHub (4924 linhas), pasta `_old/` corretamente ignorada pelo `.gitignore`
+* **Repositório público**: https://github.com/1pedroosilva/projeto-cvm-dados-financeiros
+
+### Key Insight
+Documentação para Git não é "documentação + versionamento" — é **documentação agnóstica de ambiente**. Cada caminho absoluto, cada âncora interna do workspace, cada referência pessoal quebra a promessa de portabilidade. Recrutador clonando repo deve conseguir executar código sem editar paths, sem saber de onde veio. Anonimização não é "segurança extra", é **profissionalismo básico** em código de portfólio. Validação pré-commit (git status, .gitignore, conferência manual) evitou exposição de `_old/` — 30 segundos extras de conferência salvaram de push irreversível com arquivos sensíveis.
+
+---
+
 ## 📅 05/08/2026 - Padronização de Formato: Notebooks em .py para Git Limpo
 
 ### Contexto
