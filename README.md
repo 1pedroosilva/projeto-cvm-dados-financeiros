@@ -82,6 +82,11 @@ Construir uma arquitetura de dados em camadas (medallão) para ingestão, transf
 
 Para detalhes sobre arquitetura, padrões, convenções e fluxo de dados:
 
+* **Frameworks e Padrões Universais (Tipo 1 - Conceitual)**: Ver projeto [databricks-genie-skills](https://github.com/1pedroosilva/databricks-genie-skills)
+  - Skills reutilizáveis entre projetos (nomenclaturas, estrutura notebooks, revisão código 4 frentes, resiliência operacional, arquitetura medalhão, Unity Catalog, protocolo atualização)
+  - Investigação técnica completa sobre Databricks Genie Code Skill Registry
+  - Frameworks universais não duplicados neste projeto (fonte única)
+
 * **Arquitetura e Padrões Técnicos**: Ver [00_documentacao/tecnica/arquitetura.md](00_documentacao/tecnica/arquitetura.md)
   - Camadas Medallão (Bronze/Silver/Gold)
   - Landing Zone e versionamento
