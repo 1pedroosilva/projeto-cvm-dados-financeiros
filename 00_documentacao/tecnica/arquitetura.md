@@ -82,7 +82,7 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 
 **Objetivo**: Preservar arquivos originais da fonte sem alteração
 
-**Localização**: Unity Catalog Volume `/Volumes/main/proj_cvm/landing/dfp/{ano}/`
+**Localização**: Unity Catalog Volume `/Volumes/workspace/proj_cvm/landing/dfp/{ano}/`
 
 **Pipeline**:
 1. **Download** via `003_download_cvm_para_landing.py`
@@ -97,11 +97,11 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
    - `last_modified` (timestamp HTTP)
    - `content_length` (tamanho do arquivo)
    - `download_timestamp` (quando foi baixado)
-3. **Rastreamento** em tabela de controle `proj_cvm_04_apoio.controle_ingestao`
+3. **Rastreamento** em tabela de controle `proj_cvm_05_apoio.controle_ingestao`
 
 **Estrutura**:
 ```
-/Volumes/main/proj_cvm/landing/dfp/
+/Volumes/workspace/proj_cvm/landing/dfp/
 ├── 2020/
 │   ├── dfp_cia_aberta_2020.zip
 │   └── _metadata.json
@@ -218,7 +218,7 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 3. Detectar novos períodos ou correções
 4. Executar notebooks na ordem correta
 
-**Tabela de Controle**: `proj_cvm_04_apoio.controle_ingestao`
+**Tabela de Controle**: `proj_cvm_05_apoio.controle_ingestao`
 * Rastreia cada ingestão (ano, timestamp, versão)
 * Detecta mudanças via `last_modified`
 * Evita reprocessamento desnecessário
@@ -227,7 +227,7 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 
 ### Configuração Centralizada
 
-**Arquivo**: `04_apoio/config_parametros.py`
+**Arquivo**: `05_apoio/config_parametros.py`
 
 **Objetivo**: Ponto único de configuração para todo o pipeline (URLs, paths, schemas, contratos de dados)
 
@@ -240,9 +240,9 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 **Uso em notebooks**:
 ```python
 # Célula 2: INICIALIZAÇÃO E IMPORTS
-%run ../04_apoio/config_parametros  # Notebook em 01_bronze/ ou 02_silver/
+%run ../05_apoio/config_parametros  # Notebook em 01_bronze/ ou 02_silver/
 # ou
-%run ./config_parametros  # Notebook em 04_apoio/
+%run ./config_parametros  # Notebook em 05_apoio/
 
 # Inicializar ANOS_PROCESSAR (se ainda não foi inicializado)
 if ANOS_PROCESSAR is None:
@@ -274,12 +274,12 @@ inicializar_anos_processar(force_anos=[2023, 2024])
 
 ### Infraestrutura
 
-**Landing Zone** (`/Volumes/main/proj_cvm/landing/dfp/`):
+**Landing Zone** (`/Volumes/workspace/proj_cvm/landing/dfp/`):
 * Preservação de arquivos originais da CVM
 * Metadados HTTP (`_metadata.json` por ano)
 * Versionamento automático de arquivos atualizados
 
-**Scripts de Apoio** (`04_apoio/`):
+**Scripts de Apoio** (`05_apoio/`):
 * `000_orquestrador_pipeline.py` - Detecção inteligente de períodos
 * `001_ddl_create_tables.py` - Criação de schemas e tabelas Unity Catalog
 * `002_ddl_controle_ingestao.py` - Tabela de controle de ingestão
@@ -295,12 +295,13 @@ inicializar_anos_processar(force_anos=[2023, 2024])
 | --- | --- | --- |
 | `101_cvm_dfp_dre.py` | `proj_cvm_01_bronze.101_dre_dfp` | DRE (Resultado do Exercício) |
 | `102_cvm_dfp_bpa.py` | `proj_cvm_01_bronze.102_bpa_dfp` | BPA (Balanço Patrimonial Ativo) |
+| `103_cvm_dfp_bpp.py` | `proj_cvm_01_bronze.103_bpp_dfp` | BPP (Balanço Patrimonial Passivo) |
 
 **Características Técnicas:**
-* **Origem**: Leitura de Landing Zone (`/Volumes/main/proj_cvm/landing/dfp/{ano}/`)
+* **Origem**: Leitura de Landing Zone (`/Volumes/workspace/proj_cvm/landing/dfp/{ano}/`)
 * **Versionamento**: Colunas `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts`
 * **Estratégia**: APPEND-ONLY (histórico completo preservado)
-* **Controle**: Registro em `proj_cvm_04_apoio.controle_ingestao`
+* **Controle**: Registro em `proj_cvm_05_apoio.controle_ingestao`
 * **Idempotência**: Mesma versão de arquivo gera mesma versão de dados
 
 ### Camada Silver
@@ -336,9 +337,9 @@ inicializar_anos_processar(force_anos=[2023, 2024])
 **Sintaxe correta**:
 ```python
 # Notebook em 01_bronze/ ou 02_silver/
-%run ../04_apoio/config_parametros
+%run ../05_apoio/config_parametros
 
-# Notebook em 04_apoio/
+# Notebook em 05_apoio/
 %run ./config_parametros
 ```
 
@@ -437,7 +438,7 @@ def apply_schema_migration_if_needed():
     - 001 (31/07/2026): Correção tipos STRING → INT/TIMESTAMP
     """
     migrations = [
-        ("proj_cvm_04_apoio.controle_ingestao", "last_modified_cvm", "TIMESTAMP"),
+        ("proj_cvm_05_apoio.controle_ingestao", "last_modified_cvm", "TIMESTAMP"),
         ("proj_cvm_02_silver.201_dre_dfp", "VERSAO", "INT"),
         ("proj_cvm_02_silver.201_dre_dfp", "CD_CVM", "INT"),
         # ...
@@ -481,8 +482,15 @@ def apply_schema_migration_if_needed():
 
 #### Pastas
 * **Formato**: 2 dígitos + nome descritivo
-* **Exemplos**: `00_documentacao`, `01_bronze`, `02_silver`, `03_gold`
+* **Exemplos**: `00_documentacao`, `01_bronze`, `02_silver`, `03_gold`, `04_analises_exploratorias`, `05_apoio`
 * **Objetivo**: Forçar ordenação lógica (não alfabética)
+* **Estrutura atual**:
+  - `00_documentacao/` - Documentação do projeto
+  - `01_bronze/` - Notebooks de ingestão (camada bronze)
+  - `02_silver/` - Notebooks de transformação (camada silver)
+  - `03_gold/` - Notebooks de agregação (camada gold)
+  - `04_analises_exploratorias/` - Notebooks de EDA
+  - `05_apoio/` - Scripts de infraestrutura (DDL, orquestrador, config, download)
 
 #### Notebooks
 * **Formato**: 3 dígitos + nome descritivo autocontido
@@ -565,18 +573,18 @@ df_resultado = spark.sql("""
 
 ### Requisitos de Resiliência
 
-**Princípio**: O projeto adota os padrões de resiliência operacional definidos em `/especificacoes/resiliencia_operacional.md`.
+**Princípio**: O projeto adota os padrões de resiliência operacional definidos no projeto [databricks-genie-skills](https://github.com/1pedroosilva/databricks-genie-skills) (skill `resiliencia-operacional`).
 
 **Implementação obrigatória em notebooks de produção**:
 * Retry logic com exponential backoff para chamadas HTTP/APIs
 * Tratamento granular de erros (try/except por unidade de trabalho)
 * Logging estruturado (timestamp, contexto, status)
-* Checkpointing via tabela de controle (`proj_cvm_04_apoio.controle_ingestao`)
+* Checkpointing via tabela de controle (`proj_cvm_05_apoio.controle_ingestao`)
 * Validação de pré-requisitos antes de processar
 * Auto-ajuste de períodos (detecção inteligente de pendentes)
 * Parametrização externa (config em arquivos Python)
 
-**Referência técnica completa**: Ver `resiliencia_operacional.md` nas especificações do projeto
+**Referência técnica completa**: Ver skill `resiliencia-operacional` no projeto [databricks-genie-skills](https://github.com/1pedroosilva/databricks-genie-skills)
 
 ## Segurança e Compliance
 

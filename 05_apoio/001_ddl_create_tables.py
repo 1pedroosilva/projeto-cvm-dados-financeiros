@@ -62,7 +62,7 @@ def apply_schema_migration_if_needed():
     
     migrations = [
         # Migration 001: Correção tipos STRING → INT/TIMESTAMP (31/07/2026)
-        ("proj_cvm_04_apoio.controle_ingestao", "last_modified_cvm", "TIMESTAMP",
+        ("proj_cvm_05_apoio.controle_ingestao", "last_modified_cvm", "TIMESTAMP",
          "Permite comparação direta com datetime HTTP Last-Modified"),
         ("proj_cvm_02_silver.201_dre_dfp", "VERSAO", "INT",
          "Alinhamento com cast aplicado na transformação Silver"),
@@ -168,6 +168,68 @@ COMMENT 'BPA consolidado - Dados brutos extraídos do portal CVM. Mantém estrut
 """)
 
 print("✅ Tabela proj_cvm_01_bronze.102_bpa_dfp criada")
+
+# COMMAND ----------
+
+# DBTITLE 1,CRIAÇÃO DA TABELA BRONZE - 103_bpp_dfp
+# Tabela Bronze: BPP (dados brutos as-is + metadados técnicos de ingestão)
+spark.sql("""
+CREATE TABLE IF NOT EXISTS proj_cvm_01_bronze.103_bpp_dfp (
+  CNPJ_CIA STRING,
+  DT_REFER STRING,
+  VERSAO STRING,
+  DENOM_CIA STRING,
+  CD_CVM STRING,
+  GRUPO_DFP STRING,
+  MOEDA STRING,
+  ESCALA_MOEDA STRING,
+  ORDEM_EXERC STRING,
+  DT_FIM_EXERC STRING,
+  CD_CONTA STRING,
+  DS_CONTA STRING,
+  VL_CONTA STRING,
+  ST_CONTA_FIXA STRING,
+  _versao_ingestao INT,
+  _last_modified_cvm STRING,
+  _ingest_ts TIMESTAMP,
+  _source_file STRING
+)
+USING DELTA
+COMMENT 'BPP consolidado - Dados brutos extraídos do portal CVM. Mantém estrutura original + metadados técnicos + versionamento (_versao_ingestao preserva TODAS as versões).'
+""")
+
+print("✅ Tabela proj_cvm_01_bronze.103_bpp_dfp criada")
+
+# COMMAND ----------
+
+# DBTITLE 1,CRIAÇÃO DA TABELA SILVER - 203_bpp_dfp
+# Tabela Silver: BPP transformada (dados limpos e enriquecidos, particionada por ANO)
+spark.sql("""
+CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.203_bpp_dfp (
+  CNPJ_CIA STRING,
+  DT_REFER DATE,
+  VERSAO INT,
+  DENOM_CIA STRING,
+  CD_CVM INT,
+  GRUPO_DFP STRING,
+  MOEDA STRING,
+  ESCALA_MOEDA STRING,
+  ORDEM_EXERC STRING,
+  DT_FIM_EXERC DATE,
+  CD_CONTA STRING,
+  DS_CONTA STRING,
+  VL_CONTA DOUBLE,
+  ANO INT,
+  TRIMESTRE INT,
+  MES INT,
+  DT_PROCESSAMENTO TIMESTAMP
+)
+USING DELTA
+PARTITIONED BY (ANO)
+COMMENT 'BPP transformado - Dados limpos, tipados e enriquecidos com colunas temporais. Particionada por ano para DELETE+APPEND incremental eficiente.'
+""")
+
+print("✅ Tabela proj_cvm_02_silver.203_bpp_dfp criada")
 
 # COMMAND ----------
 

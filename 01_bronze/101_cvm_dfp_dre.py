@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # DBTITLE 1,Documentação
 # MAGIC %md
 # MAGIC # Ingestão de Dados Financeiros - Demonstração de Resultado do Exercício
@@ -23,7 +27,7 @@
 # COMMAND ----------
 
 # DBTITLE 1,Carregar configurações
-%run ../04_apoio/config_parametros
+# MAGIC %run ../05_apoio/config_parametros
 
 # COMMAND ----------
 
@@ -135,7 +139,7 @@ for ano in ANOS_PROCESSAR:
 
     # Registrar ingestão na tabela de controle
     spark.sql(f"""
-        INSERT INTO proj_cvm_04_apoio.controle_ingestao
+        INSERT INTO proj_cvm_05_apoio.controle_ingestao
             (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
         VALUES (
             'dre',

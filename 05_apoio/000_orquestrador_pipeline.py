@@ -7,7 +7,7 @@
 # MAGIC Coordenar a execução do pipeline identificando automaticamente quais anos precisam ser processados (novos ou atualizados). Detecta mudanças na fonte CVM comparando metadados HTTP (`Last-Modified`) com a tabela de controle de ingestão.
 # MAGIC
 # MAGIC ## Estratégia de Detecção
-# MAGIC * **Modo Automático**: Consulta tabela de controle (`proj_cvm_04_apoio.controle_ingestao`) e compara com metadados da Landing Zone para identificar:
+# MAGIC * **Modo Automático**: Consulta tabela de controle (`proj_cvm_05_apoio.controle_ingestao`) e compara com metadados da Landing Zone para identificar:
 # MAGIC   - Novos anos disponíveis na CVM
 # MAGIC   - Arquivos atualizados (via `last_modified` do header HTTP)
 # MAGIC   - Anos nunca processados

@@ -18,7 +18,8 @@ Construir uma arquitetura de dados em camadas (medallão) para ingestão, transf
     │       └── dicionario_dados.md
     ├── 01_bronze/
     │   ├── 101_cvm_dfp_dre.py
-    │   └── 102_cvm_dfp_bpa.py
+    │   ├── 102_cvm_dfp_bpa.py
+    │   └── 103_cvm_dfp_bpp.py
     ├── 02_silver/
     │   ├── 201_cvm_dfp_dre.py
     │   └── 202_cvm_dfp_bpa.py
@@ -45,10 +46,10 @@ Construir uma arquitetura de dados em camadas (medallão) para ingestão, transf
 ### Implementado
 
 **Infraestrutura e Governança:**
-- ✅ Estrutura de pastas numerada (00_, 01_, 02_, 03_, 04_)
-- ✅ **Landing Zone** em Unity Catalog Volume (`/Volumes/main/proj_cvm/landing/`)
+- ✅ Estrutura de pastas numerada (00_, 01_, 02_, 03_, 04_, 05_)
+- ✅ **Landing Zone** em Unity Catalog Volume (`/Volumes/workspace/proj_cvm/landing/`)
 - ✅ Scripts DDL (001_ddl_create_tables.py + 002_ddl_controle_ingestao.py)
-- ✅ Tabela de controle de ingestão (`proj_cvm_04_apoio.controle_ingestao`)
+- ✅ Tabela de controle de ingestão (`proj_cvm_05_apoio.controle_ingestao`)
 - ✅ Configuração centralizada (`config_parametros.py`)
 - ✅ Orquestrador de pipeline (`000_orquestrador_pipeline.py`)
 - ✅ Download para Landing Zone (`003_download_cvm_para_landing.py`)

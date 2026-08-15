@@ -26,7 +26,7 @@
 # COMMAND ----------
 
 # DBTITLE 1,INICIALIZAÇÃO E IMPORTS
-%run ../04_apoio/config_parametros
+# MAGIC %run ../05_apoio/config_parametros
 
 # COMMAND ----------
 
@@ -138,7 +138,7 @@ for ano in ANOS_PROCESSAR:
     print("[4/4] Registrando processamento...")
 
     spark.sql(f"""
-        INSERT INTO proj_cvm_04_apoio.controle_ingestao
+        INSERT INTO proj_cvm_05_apoio.controle_ingestao
             (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
         VALUES (
             'bpa_silver',

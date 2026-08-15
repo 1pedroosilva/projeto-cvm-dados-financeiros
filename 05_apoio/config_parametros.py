@@ -53,7 +53,7 @@ SCHEMA_GOLD = "proj_cvm_03_gold"
 CATALOG_NAME = "workspace"
 VOLUME_LANDING = f"/Volumes/{CATALOG_NAME}/proj_cvm/landing"
 VOLUME_LANDING_DFP = f"{VOLUME_LANDING}/dfp"
-SCHEMA_APOIO = "proj_cvm_04_apoio"
+SCHEMA_APOIO = "proj_cvm_05_apoio"
 TABELA_CONTROLE = f"{SCHEMA_APOIO}.controle_ingestao"
 
 # ============================================================================
