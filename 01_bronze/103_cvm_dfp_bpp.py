@@ -139,8 +139,16 @@ def transformar_bronze(df_pandas, ano, versao_atual, last_modified_cvm):
     Transforma DataFrame pandas em DataFrame Spark Bronze com metadados técnicos.
     Retorna DataFrame Spark pronto para gravação.
     """
+    # RECONCILIAÇÃO: Contagem inicial
+    count_extraido = len(df_pandas)
+    
     logger.info(f"[TRANSFORMAÇÃO] Convertendo pandas → Spark...")
     df_raw = spark.createDataFrame(df_pandas)
+    
+    # RECONCILIAÇÃO: Validar conversão pandas → Spark
+    count_spark = df_raw.count()
+    logger.info(f"[RECONCILIAÇÃO] Extraído: {count_extraido:,} | Spark: {count_spark:,}")
+    assert count_extraido == count_spark, f"❌ Perda na conversão: {count_extraido} → {count_spark}"
     
     logger.info(f"[GUARDRAIL] Validando schema e projetando colunas essenciais...")
     df_validado = validar_e_projetar_schema(
@@ -149,6 +157,12 @@ def transformar_bronze(df_pandas, ano, versao_atual, last_modified_cvm):
         f"BPP {ano}"
     )
     
+    # RECONCILIAÇÃO: Validar que schema não rejeitou registros
+    count_validado = df_validado.count()
+    logger.info(f"[RECONCILIAÇÃO] Pós-validação: {count_validado:,}")
+    if count_validado < count_spark:
+        logger.warning(f"⚠️  {count_spark - count_validado} registros rejeitados na validação")
+    
     # Adicionar metadados técnicos
     df_bronze = df_validado \
         .withColumn("_versao_ingestao", lit(versao_atual)) \
@@ -156,8 +170,10 @@ def transformar_bronze(df_pandas, ano, versao_atual, last_modified_cvm):
         .withColumn("_ingest_ts", current_timestamp()) \
         .withColumn("_source_file", lit(f"dfp_cia_aberta_BPP_con_{ano}.csv"))
     
+    # RECONCILIAÇÃO: Confirmar volume antes de gravar
     count_registros = df_bronze.count()
-    logger.info(f"[TRANSFORMAÇÃO] DataFrame Bronze criado: {count_registros:,} registros")
+    logger.info(f"[RECONCILIAÇÃO] A gravar: {count_registros:,}")
+    assert count_registros == count_validado, f"❌ Perda após metadados: {count_validado} → {count_registros}"
     
     return df_bronze, count_registros
 
@@ -248,7 +264,23 @@ for ano in ANOS_PROCESSAR:
         metadata = validar_prerequisitos(ano)
         last_modified_cvm = metadata.get('last_modified_cvm')
         
-        # 2. Buscar próxima versão de ingestão para este ano
+        # 2. IDEMPOTÊNCIA: Verificar se já processado
+        logger.info(f"[IDEMPOTÊNCIA] Verificando se ano já foi processado...")
+        ja_processado = spark.sql(f"""
+            SELECT COUNT(*) as count
+            FROM proj_cvm_05_apoio.controle_ingestao
+            WHERE fonte = 'bpp'
+              AND ano = {ano}
+              AND last_modified_cvm = '{last_modified_cvm}'
+              AND status = 'SUCCESS'
+        """).collect()[0]['count']
+        
+        if ja_processado > 0:
+            logger.info(f"⏭️  [SKIP] Ano {ano} já processado com esta versão CVM")
+            anos_sucesso.append(ano)
+            continue
+        
+        # 3. Buscar próxima versão de ingestão para este ano
         versao_atual = spark.sql(f"""
             SELECT COALESCE(MAX(_versao_ingestao), 0) + 1 as proxima_versao
             FROM proj_cvm_01_bronze.103_bpp_dfp
@@ -258,18 +290,18 @@ for ano in ANOS_PROCESSAR:
         logger.info(f"[METADADOS] Versão de ingestão: {versao_atual}")
         logger.info(f"[METADADOS] Last-Modified CVM: {last_modified_cvm}")
         
-        # 3. Extrair dados
+        # 4. Extrair dados
         df_pandas = extrair_dados(ano)
         
-        # 4. Transformar para Bronze
+        # 5. Transformar para Bronze
         df_bronze, count_registros = transformar_bronze(
             df_pandas, ano, versao_atual, last_modified_cvm
         )
         
-        # 5. Gravar Delta
+        # 6. Gravar Delta
         gravar_delta(df_bronze, ano, versao_atual)
         
-        # 6. Registrar controle de sucesso
+        # 7. Registrar controle de sucesso
         registrar_controle_sucesso(ano, last_modified_cvm, versao_atual)
         
         duracao = time.time() - inicio
@@ -299,3 +331,8 @@ else:
     logger.info("✅ Todos os anos foram processados com sucesso!")
 
 logger.info("="*80)
+
+# Garantir falha de job quando há períodos não processados
+if anos_falha:
+    anos_falhados = [ano for ano, _ in anos_falha]
+    raise RuntimeError(f"Falha ao processar {len(anos_falha)} ano(s): {anos_falhados}")
