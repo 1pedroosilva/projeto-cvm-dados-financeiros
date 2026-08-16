@@ -13,6 +13,28 @@ Registro cronológico de evolução do projeto para defesa em entrevistas:
 3. **Implementado**: Lista objetiva (3-5 itens)
 4. **Key Insight**: 1 aprendizado realmente importante
 
+
+
+## 📅 16/08/2026 - Guardrails Operacionais: Processamento Granular por Período
+
+### Contexto
+Notebooks Bronze processavam anos sequencialmente sem isolamento de falhas — erro em um período interrompia toda a execução, perdendo trabalho dos anos já processados. Faltava rastreabilidade: execuções não registravam quais períodos tiveram sucesso/falha.
+
+### Decisões
+* **Try-except granular por ano** → Falha isolada em um período não interrompe processamento dos demais
+* **Rastreamento de execução** → Lista `anos_sucesso` registra períodos processados com sucesso
+* **Relatório final consolidado** → Exibe resultado completo ao fim (sucessos, falhas, totais processados)
+
+### Implementado
+* Notebooks 101_cvm_dfp_dre, 102_cvm_dfp_bpa, 103_cvm_dfp_bpp:
+  - Try-except envolvendo extração/transformação/carga por ano
+  - `anos_sucesso.append(ano)` após carga bem-sucedida
+  - Relatório final: contadores + listas de anos processados/falhados
+* Pipeline executa até o fim mesmo com falhas parciais, permitindo diagnóstico granular
+
+### Key Insight
+Processamento granular com isolamento de falhas permite diagnosticar períodos específicos problemáticos sem perder trabalho dos períodos bem-sucedidos. Padrão essencial para pipelines batch que processam múltiplos períodos independentes — cada período é uma unidade isolada de trabalho.
+
 ---
 
 ## 📅 15/08/2026 - Separação Arquitetural: Skills como Projeto Independente
