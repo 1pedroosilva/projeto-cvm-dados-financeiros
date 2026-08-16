@@ -249,6 +249,25 @@ COLUNAS_ESSENCIAIS_BPA = [
     "ST_CONTA_FIXA"
 ]
 
+COLUNAS_ESSENCIAIS_BPP = [
+    "CNPJ_CIA",
+    "DT_REFER",
+    "VERSAO",
+    "DENOM_CIA",
+    "CD_CVM",
+    "GRUPO_DFP",
+    "MOEDA",
+    "ESCALA_MOEDA",
+    "ORDEM_EXERC",
+    # "DT_INI_EXERC" removida: BPP (Balanço Patrimonial Passivo) não contém esta coluna na fonte CVM
+    # BPP é snapshot de posição, não fluxo de período
+    "DT_FIM_EXERC",
+    "CD_CONTA",
+    "DS_CONTA",
+    "VL_CONTA",
+    "ST_CONTA_FIXA"
+]
+
 
 def validar_e_projetar_schema(df, colunas_essenciais: list, fonte: str):
     """Valida que DataFrame contém todas as colunas essenciais e projeta apenas essas.
