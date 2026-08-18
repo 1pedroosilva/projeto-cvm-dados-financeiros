@@ -2,6 +2,7 @@
 _backup*/
 _old/
 _temp/
+.old/
 
 # Databricks
 .ipynb_checkpoints/
@@ -17,6 +18,10 @@ data/
 # Configurações pessoais
 .env
 config_local.py
+.assistant_instructions.md
+
+# Artefatos locais do workspace (IDs internos Databricks)
+00_documentacao/referencia_ids.md
 
 # IDEs
 .vscode/

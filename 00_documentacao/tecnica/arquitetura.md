@@ -482,14 +482,14 @@ def apply_schema_migration_if_needed():
 
 #### Pastas
 * **Formato**: 2 dígitos + nome descritivo
-* **Exemplos**: `00_documentacao`, `01_bronze`, `02_silver`, `03_gold`, `04_analises_exploratorias`, `05_apoio`
+* **Exemplos**: `00_documentacao`, `01_bronze`, `02_silver`, `03_gold`, `04_exploracao`, `05_apoio`
 * **Objetivo**: Forçar ordenação lógica (não alfabética)
 * **Estrutura atual**:
   - `00_documentacao/` - Documentação do projeto
   - `01_bronze/` - Notebooks de ingestão (camada bronze)
   - `02_silver/` - Notebooks de transformação (camada silver)
   - `03_gold/` - Notebooks de agregação (camada gold)
-  - `04_analises_exploratorias/` - Notebooks de EDA
+  - `04_exploracao/` - Notebooks de EDA
   - `05_apoio/` - Scripts de infraestrutura (DDL, orquestrador, config, download)
 
 #### Notebooks
