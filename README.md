@@ -32,10 +32,10 @@ Construir uma **arquitetura de dados em camadas (medallão)** para ingestão, tr
     │   └── 103_cvm_dfp_bpp.py
     ├── 02_silver/
     │   ├── 201_cvm_dfp_dre.py
-    │   └── 202_cvm_dfp_bpa.py
-    ├── 03_gold/
+    │   ├── 202_cvm_dfp_bpa.py
+    │   └── 203_cvm_dfp_bpp.py
     ├── 04_exploracao/
-    │   └── EDA_001_analise_dre_silver.py
+    │   └── EDA_001_analise_dre_silver.ipynb
     ├── 05_apoio/
     │   ├── 000_orquestrador_pipeline.py
     │   ├── 001_ddl_create_tables.py
@@ -55,6 +55,7 @@ Construir uma **arquitetura de dados em camadas (medallão)** para ingestão, tr
 * **Demonstrações Implementadas**:
   - **DRE** (Demonstração do Resultado do Exercício)
   - **BPA** (Balanço Patrimonial Ativo)
+  - **BPP** (Balanço Patrimonial Passivo)
 
 ---
 
@@ -124,7 +125,7 @@ O notebook **EDA_001** investigou **9 frentes** (escalas monetárias, hierarquia
 > 
 > Corrigido mediante **herança explícita de filtros**. Documentado em evolucao_projeto.md (17/08). Este tipo de bug de processo — premissas ocultas em queries — ilustra o valor do ciclo de validação rigorosa aplicado no projeto.
 
-O notebook completo (9 frentes investigadas, código validado) está disponível em `04_exploracao/EDA_001_analise_dre_silver.py`.
+O notebook completo (9 frentes investigadas, código validado) está disponível em `04_exploracao/EDA_001_analise_dre_silver.ipynb`.
 
 ---
 
@@ -134,7 +135,7 @@ O notebook completo (9 frentes investigadas, código validado) está disponível
 * Adicionar classificação hierárquica (**TOTALIZADORA/ANALÍTICA**) na Silver DRE
 * Executar **backfill** Bronze DRE para período 2021-2023
 * Implementar camada **Gold** (métricas e KPIs)
-* Expandir ingestão para outras demonstrações (**BPP**, **DFC**, **DMPL**)
+* Expandir ingestão para outras demonstrações (**DFC**, **DMPL**)
 * Criar dashboards de análise no **Genie Spaces**
 
 ---
@@ -162,8 +163,6 @@ Para detalhes sobre arquitetura, padrões, convenções e fluxo de dados:
   - Decisões arquiteturais
   - Aprendizados técnicos
 
-* **Referência de IDs**: Ver [00_documentacao/referencia_ids.md](00_documentacao/referencia_ids.md)
-  - Registro centralizado de IDs de todos os assets do projeto
 
 * **Dicionário de Dados**: Ver [00_documentacao/negocio/dicionario_dados.md](00_documentacao/negocio/dicionario_dados.md)
   - Metadados de negócio
