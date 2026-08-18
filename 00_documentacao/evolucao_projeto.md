@@ -15,6 +15,28 @@ Registro cronológico de evolução do projeto para defesa em entrevistas:
 
 
 
+## 📅 17/08/2026 - Correção EDA: Premissa Oculta em Validação Hierárquica
+
+### Contexto
+Análise exploratória EDA_001_analise_dre_silver continha erro sutil de premissas ocultas: célula 24 descobriu amostra válida (WLM, Q4/2025, PENÚLTIMO, DF Consolidado) com contas filhas de 3.01.*, mas célula 28 (validação hierárquica) reescreveu os filtros SQL manualmente — omitindo ORDEM_EXERC e GRUPO_DFP na CTE contas_filhas e no JOIN. Violação da frente "PREMISSAS OCULTAS" da skill revisao-codigo-quatro-frentes: validação assumiu estar testando a mesma amostra descoberta, mas filtros divergentes criaram risco de validar fatia diferente dos dados. Detectado por revisão externa.
+
+### Decisões
+* **Herdar filtros da descoberta** → Célula de validação deve replicar TODOS os filtros da célula de descoberta (CNPJ_CIA, ANO, TRIMESTRE, ORDEM_EXERC, GRUPO_DFP)
+* **Corrigir CTE e JOIN** → Adicionar ORDEM_EXERC e GRUPO_DFP no SELECT da CTE conta_pai, na CTE contas_filhas (GROUP BY), e nas condições do JOIN
+* **Documentar como exemplo de premissa oculta** → Caso clássico de validação que assume estar testando amostra X mas silenciosamente testa amostra Y
+
+### Implementado
+* Célula 28 (VALIDAÇÃO DE INTEGRIDADE HIERÁRQUICA) corrigida:
+  - CTE conta_pai: SELECT adiciona ORDEM_EXERC, GRUPO_DFP
+  - CTE contas_filhas: GROUP BY adiciona ORDEM_EXERC, GRUPO_DFP
+  - JOIN: Condições adicionais ON p.ORDEM_EXERC = f.ORDEM_EXERC AND p.GRUPO_DFP = f.GRUPO_DFP
+* Validação executada com sucesso — resultado permanece correto (2 contas, 0% divergência), mas código agora estruturalmente robusto
+
+### Key Insight
+Retranscrição manual de filtros entre células de descoberta e validação é antipadrão — cria superfície para divergência silenciosa ("dois números deveriam ser idênticos, mas divergiram"). Mesmo quando resultado numérico não diverge (neste caso ambos cenários retornaram 2 contas), erro estrutural permanece: em outro contexto (outra empresa/período), filtros incompletos poderiam agregar múltiplas combinações (PENÚLTIMO + ÚLTIMO, múltiplas demonstrações) e declarar "integridade validada" quando na verdade validou amostra diferente. Princípio: validações devem herdar valores descobertos via referências (variáveis, CTEs compartilhadas) ou garantir correspondência exata de filtros — nunca assumir que retranscrição manual preserva identidade da amostra.
+
+---
+
 ## 📅 16/08/2026 - Guardrails Operacionais: Processamento Granular por Período
 
 ### Contexto
@@ -95,12 +117,12 @@ Padrão de rastreabilidade (101→201, 102→202, 103→203) permite identifica�
 Decisão de implementar BPP (Balanço Patrimonial Passivo) antes de EDA (Exploratory Data Analysis - Análise Exploratória de Dados) revelou necessidade de pasta dedicada para análises exploratórias. Estrutura original tinha `04_apoio/` logo após camadas medalhão, mas análises exploratórias fazem parte do **fluxo de dados** (dados → exploração → decisão), enquanto apoio é infraestrutura auxiliar. Numeração de pastas deve refletir ordem cronológica: análises acontecem depois dos dados (01/02/03) mas antes da infraestrutura (DDL, orquestrador, config).
 
 ### Decisões
-* **Criar `04_analises_exploratorias/`** → Pasta para notebooks de EDA (um por fonte: eda_dre, eda_bpa, eda_bpp + notebook de análises cruzadas)
+* **Criar `04_exploracao/`** → Pasta para notebooks de EDA (um por fonte: eda_dre, eda_bpa, eda_bpp + notebook de análises cruzadas)
 * **Renomear `04_apoio/` → `05_apoio/`** → Infraestrutura vem depois do fluxo de dados na ordenação lógica
 * **Atualizar todas as referências** → Paths `%run` e tasks de Jobs orquestradores devem refletir nova numeração
 
 ### Implementado
-* Pasta `04_analises_exploratorias/` criada
+* Pasta `04_exploracao/` criada
 * Pasta `04_apoio/` renomeada para `05_apoio/`
 * Notebooks 101, 102, 201, 202: Paths `%run ../04_apoio/config_parametros` → `../05_apoio/config_parametros` atualizados
 * Job 661897477878521 (Pipeline CVM - DFP): 5 tasks atualizadas (orquestrador, DDL, download, table_comments apontando para `05_apoio/`)
