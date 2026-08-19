@@ -1,0 +1,68 @@
+# Databricks Asset Bundle - Projeto CVM Dados Financeiros
+# Pipeline de ingestão e transformação de demonstrações financeiras da CVM
+# Arquitetura: Bronze -> Silver -> Gold
+
+bundle:
+  name: projeto-cvm-dados-financeiros
+
+include:
+  - resources/**/*.yml
+
+variables:
+  # Catálogo Unity Catalog
+  catalog:
+    description: "Catálogo Unity Catalog para as tabelas do projeto"
+    default: workspace
+  
+  # Schema base do projeto
+  schema_prefix:
+    description: "Prefixo dos schemas (será concatenado com camada: bronze, silver, gold)"
+    default: proj_cvm
+  
+  # Volume Landing Zone
+  volume_landing:
+    description: "Caminho do volume UC para Landing Zone"
+    default: /Volumes/workspace/proj_cvm/landing
+  
+  # Notificações
+  notification_email:
+    description: "Email para notificações de falha no pipeline"
+    default: 1pedro.osilva@gmail.com
+  
+  # Cluster config
+  spark_version:
+    description: "Versão do Spark para os jobs"
+    default: "15.4.x-scala2.12"
+  
+  node_type:
+    description: "Tipo de nó para clusters do job"
+    default: "i3.xlarge"
+  
+  num_workers:
+    description: "Número de workers para clusters do job"
+    default: 2
+
+targets:
+  # Ambiente de desenvolvimento
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-a4218100-86c9.cloud.databricks.com
+    variables:
+      catalog: workspace
+      schema_prefix: proj_cvm_dev
+  
+  # Ambiente de produção
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-a4218100-86c9.cloud.databricks.com
+    variables:
+      catalog: workspace
+      schema_prefix: proj_cvm
+    # Validações obrigatórias para produção
+    run_as:
+      # Em produção, especificar service principal
+      # user_name: service-principal@databricks.com
+      user_name: 1pedro.osilva@gmail.com
