@@ -32,3 +32,6 @@ config_local.py
 # Sistema
 .DS_Store
 Thumbs.db
+# DABs - Arquivos gerados durante deploy
+.databricks/
+.bundle/
