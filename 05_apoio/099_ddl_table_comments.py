@@ -76,7 +76,7 @@ COMMENT ON TABLE proj_cvm_02_silver.201_dre_dfp IS
 'Demonstração do Resultado do Exercício (DRE) - Dados transformados e enriquecidos. 
 Transformações aplicadas: (1) Conversão de tipos de dados, (2) Padronização de CNPJ, (3) Remoção de duplicados, 
 (4) Tratamento de nulls críticos, (5) Enriquecimento com colunas temporais (ANO, TRIMESTRE, MES). 
-Qualidade: Dados limpos e prontos para análise | Origem: proj_cvm_01_bronze.101_dre_dfp | Processamento: MERGE incremental | Particionamento: ANO'
+Qualidade: Dados limpos e prontos para análise | Origem: proj_cvm_01_bronze.101_dre_dfp | Processamento: REPLACE WHERE (substituição atômica por período) | Particionamento: ANO'
 """)
 
 # Documentação das colunas silver
@@ -85,7 +85,7 @@ for col, desc in [
     ('DT_REFER', 'Data de referência do documento (tipo DATE)'),
     ('VERSAO', 'Versão do documento (ex: Original, Reapresentação)'),
     ('DENOM_CIA', 'Denominação social da companhia (razão social)'),
-    ('CD_CVM', 'Código CVM da companhia (STRING)'),
+    ('CD_CVM', 'Código CVM da companhia (tipo INT)'),
     ('GRUPO_DFP', 'Grupo da demonstração (ex: DF Consolidadas, DF Individuais)'),
     ('MOEDA', 'Moeda utilizada na demonstração (ex: REAL)'),
     ('ESCALA_MOEDA', 'Escala de valores (ex: UNIDADE, MIL, MILHAO)'),
@@ -149,7 +149,7 @@ COMMENT ON TABLE proj_cvm_02_silver.202_bpa_dfp IS
 'Balanço Patrimonial Ativo (BPA) - Dados transformados e enriquecidos. 
 Transformações aplicadas: (1) Conversão de tipos de dados, (2) Padronização de CNPJ, (3) Remoção de duplicados, 
 (4) Tratamento de nulls críticos, (5) Enriquecimento com colunas temporais (ANO, TRIMESTRE, MES). 
-Qualidade: Dados limpos e prontos para análise | Origem: proj_cvm_01_bronze.102_bpa_dfp | Processamento: DELETE+APPEND incremental | Particionamento: ANO'
+Qualidade: Dados limpos e prontos para análise | Origem: proj_cvm_01_bronze.102_bpa_dfp | Processamento: REPLACE WHERE (substituição atômica por período) | Particionamento: ANO'
 """)
 
 # Documentação das colunas silver BPA
@@ -221,7 +221,7 @@ COMMENT ON TABLE proj_cvm_02_silver.203_bpp_dfp IS
 'Balanço Patrimonial Passivo (BPP) - Dados transformados e enriquecidos. 
 Transformações aplicadas: (1) Conversão de tipos de dados, (2) Padronização de CNPJ, (3) Remoção de duplicados, 
 (4) Tratamento de nulls críticos, (5) Enriquecimento com colunas temporais (ANO, TRIMESTRE, MES). 
-Qualidade: Dados limpos e prontos para análise | Origem: proj_cvm_01_bronze.103_bpp_dfp | Processamento: DELETE+APPEND incremental | Particionamento: ANO'
+Qualidade: Dados limpos e prontos para análise | Origem: proj_cvm_01_bronze.103_bpp_dfp | Processamento: REPLACE WHERE (substituição atômica por período) | Particionamento: ANO'
 """)
 
 # Documentação das colunas silver BPP

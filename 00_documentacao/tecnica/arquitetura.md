@@ -1,4 +1,4 @@
-# Arquitetura Técnica - Projeto CVM Dados Financeiros
+﻿# Arquitetura Técnica - Projeto CVM Dados Financeiros
 
 ## Visão Geral
 
@@ -176,11 +176,12 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
    ```
 2. **Transformações**:
    - Conversão de tipos (`DT_REFER` → date, `VL_CONTA` → double)
-   - Remoção de duplicatas (`distinct()`)
    - Filtro de nulos (campos críticos)
    - Enriquecimento (colunas `ANO`, `TRIMESTRE`, `MES`, `DT_PROCESSAMENTO`)
-3. **Gravação**: `DELETE WHERE ano + APPEND`
-   - Reprocessa apenas o período afetado
+3. **Gravação**: `REPLACE WHERE ano`
+   - Substituição atômica por período: Delta Lake garante operação all-or-nothing
+   - Elimina janela de vulnerabilidade entre DELETE e APPEND
+   - Reprocessa apenas o período afetado, preserva histórico de outros períodos
    - Preserva histórico de outros períodos
 
 **Características**:
@@ -190,7 +191,7 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 
 > **Guardrails**: Validações detalhadas em [guardrails.md](guardrails.md)
 
-**Estratégia de Gravação**: `DELETE WHERE ano = {ano_processado}` + `APPEND`
+**Estratégia de Gravação**: `REPLACE WHERE` (substituição atômica por período)
 
 ---
 
@@ -317,7 +318,7 @@ inicializar_anos_processar(force_anos=[2023, 2024])
 * **Filtro de versão**: Window Function (ROW_NUMBER) para selecionar versão mais recente
 * **Projeção explícita**: `.select()` de todas as colunas do DDL (descarta extras de Bronze)
 * **Transformações**: Conversão de tipos, normalização, colunas derivadas (ANO, TRIMESTRE, MES)
-* **Estratégia**: DELETE WHERE ano + APPEND (idempotência por período)
+* **Estratégia**: REPLACE WHERE (substituição atômica por período - elimina janela de vulnerabilidade do DELETE+APPEND)
 * **Particionamento**: Por ano (`ANO`)
 
 ### Camada Gold
@@ -603,6 +604,18 @@ df_resultado = spark.sql("""
 * **Job Runs**: Histórico de execuções disponível no Databricks
 * **Delta History**: Auditoria de mudanças nas tabelas
 * **Logs**: Logs de execução de notebooks
+
+## Deploy e Infraestrutura
+
+O pipeline é implantado via **Databricks Asset Bundles (DABs)**, definido em `databricks.yml` (raiz do projeto) e `resources/jobs/job_pipeline_cvm.yml`. O Job `Pipeline CVM - DFP` (id `661897477878521`), originalmente criado manualmente na UI, foi adotado pelo bundle via `databricks bundle deployment bind` — não foi recriado, preservando histórico de execuções.
+
+**Características do deploy gerenciado por bundle:**
+* **`edit_mode: UI_LOCKED`**: o job não pode mais ser editado diretamente na interface do Databricks. Mudanças em tasks, schedule ou notificações exigem editar o YAML e rodar `databricks bundle deploy --target <dev|prod>`
+* **Sincronização de notebooks**: o job executa cópias dos notebooks sincronizadas pelo bundle (`/Workspace/Users/<usuario>/.bundle/projeto-cvm-dados-financeiros/<target>/files/...`), não os arquivos originais do projeto diretamente. Uma edição no notebook original só passa a valer para o job após um novo `bundle deploy`
+* **Compute serverless obrigatório**: o workspace não suporta cluster clássico (`new_cluster`); as tasks do job rodam sem especificação de cluster
+* **Modo `development`**: o target `dev` prefixa o nome do job com `[dev <usuario>]` automaticamente
+
+**Targets configurados**: `dev` (padrão, schema `proj_cvm_dev`) e `prod` (schema `proj_cvm`), ambos no mesmo workspace.
 
 ## Próximas Evoluções Técnicas
 

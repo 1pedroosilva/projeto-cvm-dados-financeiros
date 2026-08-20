@@ -1,4 +1,4 @@
-# Evolução do Projeto CVM
+﻿# Evolução do Projeto CVM
 
 ## Propósito deste Documento
 
@@ -14,6 +14,52 @@ Registro cronológico de evolução do projeto para defesa em entrevistas:
 4. **Key Insight**: 1 aprendizado realmente importante
 
 
+
+## 📅 19/08/2026 - Refactor Silver: DELETE+APPEND → REPLACE WHERE
+
+### Contexto
+Camada Silver usava DELETE WHERE ano + APPEND para idempotência por período. Problema: janela entre as duas operações não é atômica — falha após o DELETE deixa a partição vazia até o APPEND concluir. Em caso de interrupção (erro, timeout, reschedule), dados da partição ficam perdidos até reprocessamento manual.
+
+### Decisões
+* **Migrar para REPLACE WHERE** → Delta Lake garante substituição atômica (all-or-nothing) na partição — operação falha completamente ou sucede completamente, sem estado intermediário visível
+* **Remover .distinct() redundante** → Bronze idempotente já garante 1 versão por ano; distinct() na Silver é redundante e adiciona custo desnecessário
+* **Limpar comentários desatualizados** → Células markdown e documentação técnica contradiziam código (descreviam DELETE+APPEND, código usava REPLACE WHERE)
+
+### Implementado
+* Notebooks Silver (201_cvm_dfp_dre, 202_cvm_dfp_bpa, 203_cvm_dfp_bpp):
+  - Código já usava REPLACE WHERE (refactor anterior)
+  - Comentários markdown atualizados: "DELETE WHERE + APPEND" → "REPLACE WHERE (substituição atômica por período)"
+  - 203: Removida chamada .distinct() redundante do pipeline de transformação
+* Documentação de metadados (099_ddl_table_comments):
+  - 3 tabelas Silver (201_dre_dfp, 202_bpa_dfp, 203_bpp_dfp): "Processamento: DELETE+APPEND incremental" → "Processamento: REPLACE WHERE (substituição atômica por período)"
+* Documentação técnica (arquitetura.md):
+  - Seção Silver atualizada: estratégia de gravação REPLACE WHERE documentada com explicação de atomicidade
+  - 3 ocorrências corrigidas: pipeline, características técnicas, resumo da estratégia
+
+### Key Insight
+REPLACE WHERE é atomic replacement — Delta Lake torna a operação all-or-nothing na partição especificada, eliminando completamente a classe de falha do DELETE+APPEND (partição vazia entre DELETE e APPEND) sem adicionar complexidade. Operação crítica para pipelines de produção onde consistência de dados durante falhas é requisito não-negociável. DELETE+APPEND expõe janela de vulnerabilidade; REPLACE WHERE fecha essa janela por design.
+
+---
+
+## 📅 19/08/2026 - Migração de Deploy: Job Manual → Databricks Asset Bundle (DABs)
+
+### Contexto
+O Job `Pipeline CVM - DFP` era criado e mantido manualmente pela interface do Databricks, sem versionamento de sua configuração (tasks, schedule, notificações) no Git. Mudanças feitas na UI não deixavam rastro no repositório.
+
+### Decisões
+* **Adotar o job existente via bundle, não recriar** → `databricks bundle deployment bind pipeline_cvm_completo 661897477878521` vincula o bundle ao job já existente, preservando histórico de execuções e evitando duplicação
+* **Compute serverless obrigatório** → o workspace não suporta cluster clássico; os 8 blocos `new_cluster` originais do YAML causavam falha de deploy (`Only serverless compute is supported`) e foram removidos
+* **Schedule mantido pausado** → `pause_status: PAUSED`, ativação manual futura
+
+### Implementado
+* `databricks.yml` (raiz) e `resources/jobs/job_pipeline_cvm.yml` criados, definindo o job como código
+* Job vinculado ao id `661897477878521` existente via bind, sem criar job duplicado
+* Deploy validado (`databricks bundle deploy --target dev`) com as 8 tasks apontando para os notebooks reais do projeto
+
+### Key Insight
+Job gerenciado por bundle passa a executar cópias dos notebooks sincronizadas para `.bundle/<nome>/<target>/files/`, não os arquivos originais do projeto diretamente — editar um notebook sem rodar `bundle deploy` depois não afeta a próxima execução do job. Esse desacoplamento entre "arquivo que se edita" e "arquivo que executa" é a mudança operacional mais importante da migração.
+
+---
 
 ## 📅 17/08/2026 - Correção EDA: Premissa Oculta em Validação Hierárquica
 
@@ -394,7 +440,7 @@ Databricks tem dois namespaces para Unity Catalog Volumes: `/Volumes/` (usado po
 ## 📅 27/07/2026 - Refatoração: Aplicação Rigorosa de DRY na Documentação
 
 ### Contexto
-README.md e arquitetura.md continham 5 seções duplicadas (camadas Medallão, Landing Zone, convenções de numeração, princípio DRY, estrutura de notebooks). Violação clara do princípio DRY aplicado ao código mas não à documentação. Causa raiz identificada: protocolo_atualizacao.md instruía explicitamente a colocar detalhes técnicos no README.
+README.md e arquitetura.md continham 5 seções duplicadas (camadas Medalhão, Landing Zone, convenções de numeração, princípio DRY, estrutura de notebooks). Violação clara do princípio DRY aplicado ao código mas não à documentação. Causa raiz identificada: protocolo_atualizacao.md instruía explicitamente a colocar detalhes técnicos no README.
 
 ### Decisões
 * **README como índice executivo** → Visão geral (105 linhas), estrutura, status alto nível, links para arquitetura.md

@@ -88,7 +88,6 @@ for ano in ANOS_PROCESSAR:
         .withColumn("VL_CONTA", col("VL_CONTA").cast(DoubleType())) \
         .withColumn("VERSAO", col("VERSAO").cast(IntegerType())) \
         .withColumn("CD_CVM", col("CD_CVM").cast(IntegerType())) \
-        .distinct() \
         .filter(
             col("CNPJ_CIA").isNotNull() &
             col("DT_REFER").isNotNull() &
@@ -124,14 +123,13 @@ for ano in ANOS_PROCESSAR:
         "DT_PROCESSAMENTO"
     )
 
-    # ETAPA 3: DELETE WHERE + APPEND (idempotência por período)
+    # ETAPA 3: REPLACE WHERE (substituição atômica por período)
     print("[3/4] Gravando na tabela Silver...")
-
-    spark.sql(f"DELETE FROM proj_cvm_02_silver.201_dre_dfp WHERE ANO = {ano}")
 
     df_silver.write \
         .format("delta") \
-        .mode("append") \
+        .mode("overwrite") \
+        .option("replaceWhere", f"ANO = {ano}") \
         .saveAsTable("proj_cvm_02_silver.201_dre_dfp")
 
     print(f"   ✓ Ano {ano} gravado com sucesso")
@@ -160,12 +158,3 @@ print(f"\n{'='*80}")
 print(f"SILVER DRE - PROCESSAMENTO CONCLUÍDO")
 print(f"Anos processados: {ANOS_PROCESSAR}")
 print("="*80)
-
-# COMMAND ----------
-
-from pyspark.sql.functions import col, year
-
-df_bronze = spark.table("proj_cvm_01_bronze.101_dre_dfp")
-anos_disponiveis = df_bronze.select(year(col("DT_REFER")).alias("ANO")).distinct().orderBy("ANO")
-
-display(anos_disponiveis)
