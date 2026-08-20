@@ -1,18 +1,16 @@
-# Projeto CVM - Dados Financeiros
+﻿# Projeto CVM - Dados Financeiros
 
 ## Visão Geral
 
 Projeto de gestão e análise de dados financeiros de companhias abertas brasileiras, extraídos do portal de **Dados Abertos da CVM** (Comissão de Valores Mobiliários).
 
-O pipeline implementa a **arquitetura medalhão** (Bronze → Silver → Gold) com análises exploratórias intermediárias para validação de qualidade antes de promover dados para camadas downstream
-
-> **Insight-chave**: A análise exploratória identificou **3 problemas críticos** na camada Silver antes de avançar para Gold — escalas monetárias não normalizadas (erro 1000x), hierarquia contábil sem classificação (risco de duplicação), e perda de histórico 2021-2023. O ciclo **ACHADO → DECISÃO → CÓDIGO → VALIDAÇÃO** provou valor real ao detectar bugs que queries downstream silenciosamente propagariam.
+O pipeline implementa a **arquitetura medalhão** (Bronze → Silver → Gold) com análises exploratórias intermediárias para validação de qualidade antes de promover dados para camadas downstream.
 
 ---
 
 ## Objetivo
 
-Construir uma **arquitetura de dados em camadas (medallão)** para ingestão, transformação e análise de demonstrações financeiras padronizadas (DFP) de empresas de capital aberto no Brasil.
+Construir uma **arquitetura de dados em camadas (medalhão)** para ingestão, transformação e análise de demonstrações financeiras padronizadas (DFP) de empresas de capital aberto no Brasil.
 
 ---
 
@@ -43,6 +41,10 @@ Construir uma **arquitetura de dados em camadas (medallão)** para ingestão, tr
     │   ├── 003_download_cvm_para_landing.py
     │   ├── 099_ddl_table_comments.py
     │   └── config_parametros.py
+    ├── resources/
+    │   └── jobs/
+    │       └── job_pipeline_cvm.yml
+    ├── databricks.yml
     └── README.md
 
 ---
@@ -56,6 +58,14 @@ Construir uma **arquitetura de dados em camadas (medallão)** para ingestão, tr
   - **DRE** (Demonstração do Resultado do Exercício)
   - **BPA** (Balanço Patrimonial Ativo)
   - **BPP** (Balanço Patrimonial Passivo)
+
+---
+
+## Deploy e Execução
+
+O pipeline roda como um Databricks Job (`Pipeline CVM - DFP`) gerenciado via **Databricks Asset Bundles (DABs)**, definido em `databricks.yml` e `resources/jobs/job_pipeline_cvm.yml`. Mudanças em tasks, schedule ou notificações são feitas nesses arquivos e aplicadas com `databricks bundle deploy`, não editando o job diretamente na interface do Databricks.
+
+Detalhes técnicos completos (sincronização de notebooks, compute serverless, modo de edição) em [00_documentacao/tecnica/arquitetura.md](00_documentacao/tecnica/arquitetura.md).
 
 ---
 
@@ -86,11 +96,15 @@ Construir uma **arquitetura de dados em camadas (medallão)** para ingestão, tr
 
 ✓ **Silver - DRE** transformada (notebook `201_cvm_dfp_dre.py`)
   - Tabela: `proj_cvm_02_silver.201_dre_dfp`
-  - Filtro de versão mais recente + **DELETE WHERE + APPEND**
+  - Filtro de versão mais recente + **Gravação atômica por período**
 
 ✓ **Silver - BPA** transformada (notebook `202_cvm_dfp_bpa.py`)
   - Tabela: `proj_cvm_02_silver.202_bpa_dfp`
-  - Filtro de versão mais recente + **DELETE WHERE + APPEND**
+  - Filtro de versão mais recente + **Gravação atômica por período**
+
+✓ **Silver - BPP** transformada (notebook `203_cvm_dfp_bpp.py`)
+  - Tabela: `proj_cvm_02_silver.203_bpp_dfp`
+  - Filtro de versão mais recente + **Gravação atômica por período**
 
 **Documentação:**
 
@@ -99,33 +113,9 @@ Construir uma **arquitetura de dados em camadas (medallão)** para ingestão, tr
 
 **Análises Exploratórias:**
 
-✓ **EDA_001_analise_dre_silver** (9 frentes investigadas sobre Silver DRE)
-  - Identificados **3 problemas críticos**: escalas monetárias não normalizadas, hierarquia contábil sem classificação, perda de dados históricos 2021-2023
-  - Validações confirmadas: **completude**, **chave única**, **integridade hierárquica**, **versões**
-
----
-
-## Análise Exploratória e Qualidade de Dados
-
-A análise exploratória do Silver DRE aplicou o ciclo **ACHADO → DECISÃO → CÓDIGO → VALIDAÇÃO** para identificar problemas de qualidade antes de avançar para a camada Gold. 
-
-O notebook **EDA_001** investigou **9 frentes** (escalas monetárias, hierarquia contábil, cobertura temporal, completude, chave única, integridade hierárquica, versionamento, duplicações estruturais, e consistência de grupos) e identificou **3 problemas críticos** que impactam análises downstream.
-
-### Problemas Identificados na Camada Silver
-
-| Achado | Impacto | Ação | Evidência |
-|--------|---------|------|-----------|
-| Escalas monetárias não normalizadas (Bronze preserva escala original: unidade vs milhares) | Erro de magnitude **1000x** em queries de soma/agregação | Normalizar escala na transformação Silver | EDA_001, célula "Escala Monetária" |
-| Hierarquia contábil sem classificação de grupo (CD_CONTA não indica se é conta **TOTALIZADORA** ou **ANALÍTICA**) | Risco de duplicar valor ao somar contas-pai + contas-filho na mesma agregação | Adicionar classificação hierárquica na Silver (campo **TIPO_CONTA**) | EDA_001, célula "Hierarquia Contábil" |
-| Perda de histórico 2021-2023 (Bronze contém apenas 2024) | Análises de tendência e comparativos multi-anuais inviabilizados | Executar **backfill 2021-2023** na Bronze. Causa ainda não determinada, requer investigação do notebook 101 (hipóteses: falha silenciosa no processamento, truncamento acidental, parâmetro modificado) | EDA_001, célula "Cobertura Temporal" |
-
-### Rigor Metodológico
-
-> Durante a validação hierárquica, uma **premissa oculta** foi identificada: a célula de descoberta encontrou uma amostra com filtros específicos (ORDEM_EXERC, GRUPO_DFP), mas a célula de validação seguinte retranscreveu manualmente os filtros SQL e omitiu essas colunas, testando uma **fatia diferente da amostra** sem perceber. 
-> 
-> Corrigido mediante **herança explícita de filtros**. Documentado em evolucao_projeto.md (17/08). Este tipo de bug de processo — premissas ocultas em queries — ilustra o valor do ciclo de validação rigorosa aplicado no projeto.
-
-O notebook completo (9 frentes investigadas, código validado) está disponível em `04_exploracao/EDA_001_analise_dre_silver.ipynb`.
+✓ **EDA_001_analise_dre_silver** (análise de qualidade da camada Silver DRE)
+  - 9 frentes de validação investigadas
+  - Detalhes em `04_exploracao/EDA_001_analise_dre_silver.ipynb`
 
 ---
 
@@ -150,7 +140,7 @@ Para detalhes sobre arquitetura, padrões, convenções e fluxo de dados:
   - Frameworks universais não duplicados neste projeto (fonte única)
 
 * **Arquitetura e Padrões Técnicos**: Ver [00_documentacao/tecnica/arquitetura.md](00_documentacao/tecnica/arquitetura.md)
-  - Camadas Medallão (**Bronze/Silver/Gold**)
+  - Camadas Medalhão (**Bronze/Silver/Gold**)
   - **Landing Zone** e versionamento
   - Stack tecnológico
   - Convenções de numeração (notebooks, tabelas)
