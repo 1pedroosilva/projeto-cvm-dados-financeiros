@@ -28,19 +28,6 @@ variables:
   notification_email:
     description: "Email para notificações de falha no pipeline"
     default: 1pedro.osilva@gmail.com
-  
-  # Cluster config
-  spark_version:
-    description: "Versão do Spark para os jobs"
-    default: "15.4.x-scala2.12"
-  
-  node_type:
-    description: "Tipo de nó para clusters do job"
-    default: "i3.xlarge"
-  
-  num_workers:
-    description: "Número de workers para clusters do job"
-    default: 2
 
 targets:
   # Ambiente de desenvolvimento

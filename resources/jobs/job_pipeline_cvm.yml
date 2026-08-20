@@ -6,25 +6,25 @@ resources:
   jobs:
     pipeline_cvm_completo:
       name: "[${var.schema_prefix}] Pipeline CVM - Dados Financeiros"
-      
+
       # Configurações gerais do job
       max_concurrent_runs: 1
       timeout_seconds: 7200  # 2 horas
-      
+
       # Notificações
       email_notifications:
         on_failure:
           - ${var.notification_email}
         on_success:
           - ${var.notification_email}
-      
+
       # Schedule - Executar todo dia às 3h da manhã
       schedule:
         quartz_cron_expression: "0 0 3 * * ?"
         timezone_id: "America/Sao_Paulo"
         pause_status: PAUSED  # Iniciar pausado (ativar manualmente quando pronto)
-      
-      # Tasks do pipeline
+
+      # Tasks do pipeline (compute serverless - workspace nao suporta cluster classico)
       tasks:
         # TASK 1: Orquestração e Detecção de Anos
         - task_key: orquestracao_deteccao_anos
@@ -32,90 +32,56 @@ resources:
             notebook_path: ../../05_apoio/000_orquestrador_pipeline.py
             base_parameters:
               anos_override: ""  # Deixar vazio para detecção automática
-          new_cluster:
-            spark_version: ${var.spark_version}
-            node_type_id: ${var.node_type}
-            num_workers: 1  # Orquestração precisa apenas 1 worker
-            spark_conf:
-              "spark.databricks.delta.preview.enabled": "true"
-        
+
         # TASK 2: Download dos arquivos CVM para Landing Zone
         - task_key: download_cvm_landing
           depends_on:
             - task_key: orquestracao_deteccao_anos
           notebook_task:
             notebook_path: ../../05_apoio/003_download_cvm_para_landing.py
-          new_cluster:
-            spark_version: ${var.spark_version}
-            node_type_id: ${var.node_type}
-            num_workers: 1  # Download é I/O bound
-        
+
         # TASK 3: Bronze DRE
         - task_key: bronze_dre
           depends_on:
             - task_key: download_cvm_landing
           notebook_task:
             notebook_path: ../../01_bronze/101_cvm_dfp_dre.py
-          new_cluster:
-            spark_version: ${var.spark_version}
-            node_type_id: ${var.node_type}
-            num_workers: ${var.num_workers}
-        
+
         # TASK 4: Bronze BPA (paralelo ao DRE)
         - task_key: bronze_bpa
           depends_on:
             - task_key: download_cvm_landing
           notebook_task:
             notebook_path: ../../01_bronze/102_cvm_dfp_bpa.py
-          new_cluster:
-            spark_version: ${var.spark_version}
-            node_type_id: ${var.node_type}
-            num_workers: ${var.num_workers}
-        
+
         # TASK 5: Bronze BPP (paralelo ao DRE e BPA)
         - task_key: bronze_bpp
           depends_on:
             - task_key: download_cvm_landing
           notebook_task:
             notebook_path: ../../01_bronze/103_cvm_dfp_bpp.py
-          new_cluster:
-            spark_version: ${var.spark_version}
-            node_type_id: ${var.node_type}
-            num_workers: ${var.num_workers}
-        
+
         # TASK 6: Silver DRE
         - task_key: silver_dre
           depends_on:
             - task_key: bronze_dre
           notebook_task:
             notebook_path: ../../02_silver/201_cvm_dfp_dre.py
-          new_cluster:
-            spark_version: ${var.spark_version}
-            node_type_id: ${var.node_type}
-            num_workers: ${var.num_workers}
-        
+
         # TASK 7: Silver BPA (paralelo ao DRE)
         - task_key: silver_bpa
           depends_on:
             - task_key: bronze_bpa
           notebook_task:
             notebook_path: ../../02_silver/202_cvm_dfp_bpa.py
-          new_cluster:
-            spark_version: ${var.spark_version}
-            node_type_id: ${var.node_type}
-            num_workers: ${var.num_workers}
-        
+
         # TASK 8: Silver BPP (paralelo ao DRE e BPA)
         - task_key: silver_bpp
           depends_on:
             - task_key: bronze_bpp
           notebook_task:
             notebook_path: ../../02_silver/203_cvm_dfp_bpp.py
-          new_cluster:
-            spark_version: ${var.spark_version}
-            node_type_id: ${var.node_type}
-            num_workers: ${var.num_workers}
-      
+
       # Tags para organização
       tags:
         projeto: cvm-dados-financeiros
