@@ -354,7 +354,8 @@ def inicializar_anos_processar(force_anos: list = None, silent: bool = False) ->
             # Consolidar anos de múltiplas fontes DFP
             fontes_config = [
                 ('dre', 'dre'),
-                ('bpa', 'bpa')
+                ('bpa', 'bpa'),
+                ('bpp', 'bpp')
             ]
 
             anos_consolidados = set()

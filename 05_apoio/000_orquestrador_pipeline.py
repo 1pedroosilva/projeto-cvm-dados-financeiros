@@ -87,8 +87,8 @@ print(f"Quantidade: {len(ANOS_PROCESSAR) if ANOS_PROCESSAR else 0} ano(s)")
 print(f"\nPróximos passos:")
 if ANOS_PROCESSAR:
     print(f"  1. Executar notebook: 002_download_cvm_para_landing")
-    print(f"  2. Executar notebooks Bronze: 101_cvm_dfp_dre, 102_cvm_dfp_bpa")
-    print(f"  3. Executar notebooks Silver: 201_cvm_dfp_dre, 202_cvm_dfp_bpa")
+    print(f"  2. Executar notebooks Bronze: 101_cvm_dfp_dre, 102_cvm_dfp_bpa, 103_cvm_dfp_bpp")
+    print(f"  3. Executar notebooks Silver: 201_cvm_dfp_dre, 202_cvm_dfp_bpa, 203_cvm_dfp_bpp")
 else:
     print(f"  • Nenhuma ação necessária - dados já atualizados")
 print("="*80)
