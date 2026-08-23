@@ -21,3 +21,32 @@ def test_url_do_ano_aponta_para_zip_da_cvm():
 
 def test_url_muda_conforme_o_ano():
     assert config.get_url_arquivo_cvm(2020) != config.get_url_arquivo_cvm(2021)
+
+def test_janela_temporal_padrao_e_de_cinco_anos():
+    """A politica de quantos anos processar e uma decisao de negocio.
+
+    Se alguem mudar JANELA_ANOS_RELEVANTE sem querer, este teste avisa.
+    """
+    assert config.JANELA_ANOS_RELEVANTE == 5
+
+
+def test_historico_da_cvm_comeca_em_2010():
+    assert config.ANO_INICIAL_CVM == 2010
+
+
+def test_anos_disponiveis_cobrem_do_inicio_ate_hoje():
+    from datetime import datetime
+
+    anos = config.get_anos_disponiveis_cvm()
+    ano_atual = datetime.now().year
+
+    assert anos[0] == 2010
+    assert anos[-1] == ano_atual
+    assert len(anos) == ano_atual - 2010 + 1
+
+
+def test_todos_os_anos_sao_inteiros_sem_repeticao():
+    anos = config.get_anos_disponiveis_cvm()
+
+    assert all(isinstance(ano, int) for ano in anos)
+    assert len(anos) == len(set(anos))
