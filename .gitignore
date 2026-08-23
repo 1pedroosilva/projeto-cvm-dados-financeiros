@@ -36,3 +36,5 @@ Thumbs.db
 .databricks/
 .bundle/
 *.bak
+# Ignorar o cache do pytest
+.pytest_cache/
