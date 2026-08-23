@@ -1,5 +1,7 @@
 ﻿# Projeto CVM - Dados Financeiros
 
+[![CI](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/ci.yml/badge.svg)](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/ci.yml)
+
 ## Visão Geral
 
 Projeto de gestão e análise de dados financeiros de companhias abertas brasileiras, extraídos do portal de **Dados Abertos da CVM** (Comissão de Valores Mobiliários).
