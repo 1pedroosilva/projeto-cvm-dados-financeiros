@@ -38,3 +38,6 @@ Thumbs.db
 *.bak
 # Ignorar o cache do pytest
 .pytest_cache/
+
+#Ignorar o cache do ruff
+.ruff_cache/

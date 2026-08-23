@@ -20,8 +20,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Instalar pytest
-        run: pip install pytest
+      - name: Instalar pytest e ruff
+        run: pip install pytest ruff
+
+      - name: Passar o corretor de codigo
+        run: python -m ruff check .
 
       - name: Rodar os testes
         run: python -m pytest tests/ -v
