@@ -7,8 +7,14 @@
 # Vantagem: Mudança de configuração em um único lugar
 # ============================================================================
 
+import os
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+# Fuso de referencia do projeto: os dados da CVM seguem o calendario
+# fiscal brasileiro, entao "que ano e hoje" se responde em Brasilia.
+FUSO_PROJETO = ZoneInfo("America/Sao_Paulo")
 
 # ============================================================================
 # PARÂMETROS DE PROCESSAMENTO
@@ -67,7 +73,7 @@ def get_url_arquivo_cvm(ano: int) -> str:
 
 def get_anos_disponiveis_cvm() -> list:
     """Retorna anos disponíveis na CVM (2010 até ano corrente)."""
-    ano_atual = datetime.now().year
+    ano_atual = datetime.now(FUSO_PROJETO).year
     return list(range(ANO_INICIAL_CVM, ano_atual + 1))
 
 
@@ -81,9 +87,13 @@ def verificar_arquivo_existe_cvm(url: str) -> tuple:
         req = urllib.request.Request(url, method='HEAD')
         with urllib.request.urlopen(req, timeout=10) as response:
             last_modified_str = response.headers.get('Last-Modified')
-            last_modified_dt = datetime.strptime(
-                last_modified_str, '%a, %d %b %Y %H:%M:%S %Z'
-            ) if last_modified_str else None
+            last_modified_dt = (
+                datetime.strptime(
+                    last_modified_str, '%a, %d %b %Y %H:%M:%S %Z'
+                ).replace(tzinfo=timezone.utc)
+                if last_modified_str
+                else None
+            )
 
             content_length = response.headers.get('Content-Length')
             tamanho_bytes = int(content_length) if content_length else None
@@ -114,7 +124,11 @@ def get_novos_anos_para_processar(fonte: str, tabela_controle: str = TABELA_CONT
             .toPandas()
         )
 
-        anos_processados = anos_processados_rows['ano'].tolist() if not anos_processados_rows.empty else []
+        anos_processados = (
+            anos_processados_rows['ano'].tolist()
+            if not anos_processados_rows.empty
+            else []
+        )
         novos_anos = [ano for ano in anos_disponiveis if ano not in anos_processados]
         return sorted(novos_anos)
 
@@ -122,7 +136,9 @@ def get_novos_anos_para_processar(fonte: str, tabela_controle: str = TABELA_CONT
         return anos_disponiveis
 
 
-def get_anos_com_atualizacao_cvm(fonte: str, tipo_demo: str, tabela_controle: str = TABELA_CONTROLE) -> list:
+def get_anos_com_atualizacao_cvm(
+    fonte: str, tipo_demo: str, tabela_controle: str = TABELA_CONTROLE
+) -> list:
     """Detecta anos cujo arquivo foi atualizado na CVM (Last-Modified mais recente).
 
     Nota: last_modified_cvm na tabela de controle é TIMESTAMP, permitindo comparação
@@ -195,7 +211,7 @@ def get_anos_para_processar_inteligente(fonte: str, tipo_demo: str,
     todos_pendentes = set(novos_anos + anos_atualizados)
 
     # Aplicar janela temporal (política definida em JANELA_ANOS_RELEVANTE)
-    ano_atual = datetime.now().year
+    ano_atual = datetime.now(FUSO_PROJETO).year
     ano_inicio_janela = ano_atual - JANELA_ANOS_RELEVANTE
     janela_relevante = set(range(ano_inicio_janela, ano_atual + 1))
 
@@ -304,7 +320,10 @@ def validar_e_projetar_schema(df, colunas_essenciais: list, fonte: str):
     # GUARDRAIL 2: Identificar colunas extras (informativo, não bloqueia)
     colunas_extras = colunas_presentes - colunas_requeridas
     if colunas_extras:
-        print(f"ℹ️  {fonte}: Colunas extras detectadas (serão descartadas): {sorted(colunas_extras)}")
+        print(
+            f"ℹ️  {fonte}: Colunas extras detectadas (serão descartadas): "
+            f"{sorted(colunas_extras)}"
+        )
 
     # Projetar apenas colunas essenciais na ordem definida
     return df.select(*colunas_essenciais)
@@ -315,8 +334,6 @@ def validar_e_projetar_schema(df, colunas_essenciais: list, fonte: str):
 # ============================================================================
 # ANOS_PROCESSAR é definido via função inicializar_anos_processar()
 # que deve ser chamada explicitamente pelos notebooks após carregar este arquivo
-
-import os
 
 # Valor padrão (será sobrescrito pela função de inicialização)
 ANOS_PROCESSAR = None
@@ -374,13 +391,13 @@ def inicializar_anos_processar(force_anos: list = None, silent: bool = False) ->
                     print(f"🤖 ANOS_PROCESSAR (detecção inteligente): {ANOS_PROCESSAR}")
             else:
                 # Fallback: se nenhum ano detectado, usar apenas ano atual
-                ANOS_PROCESSAR = [datetime.now().year]
+                ANOS_PROCESSAR = [datetime.now(FUSO_PROJETO).year]
                 if not silent:
                     print(f"⚠️  ANOS_PROCESSAR (fallback - nenhum pendente): {ANOS_PROCESSAR}")
 
         except Exception as e:
             # Fallback em caso de erro (primeira execução, tabela não existe, etc)
-            ANOS_PROCESSAR = [datetime.now().year]
+            ANOS_PROCESSAR = [datetime.now(FUSO_PROJETO).year]
             if not silent:
                 print(f"⚠️  ANOS_PROCESSAR (fallback - erro na detecção): {ANOS_PROCESSAR}")
                 print(f"    Erro: {type(e).__name__}: {e}")

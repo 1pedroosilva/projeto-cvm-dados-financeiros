@@ -38,7 +38,7 @@ def test_anos_disponiveis_cobrem_do_inicio_ate_hoje():
     from datetime import datetime
 
     anos = config.get_anos_disponiveis_cvm()
-    ano_atual = datetime.now().year
+    ano_atual = datetime.now(config.FUSO_PROJETO).year
 
     assert anos[0] == 2010
     assert anos[-1] == ano_atual

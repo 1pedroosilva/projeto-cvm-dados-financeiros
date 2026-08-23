@@ -1,0 +1,11 @@
+# Configuracao do ruff (corretor de codigo).
+#
+# Por enquanto o corretor olha apenas o codigo Python comum do projeto.
+# Os notebooks Databricks ficam de fora ate serem revisados um a um.
+
+include = ["tests/**/*.py", "05_apoio/config_parametros.py"]
+
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "I", "DTZ"]
