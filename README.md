@@ -19,6 +19,9 @@ Construir uma **arquitetura de dados em camadas (medalhão)** para ingestão, tr
 ## Estrutura do Projeto
 
     projeto-cvm-dados-financeiros/
+    ├── .github/
+    │   └── workflows/
+    │       └── ci.yml
     ├── 00_documentacao/
     │   ├── evolucao_projeto.md
     │   ├── tecnica/
@@ -46,7 +49,10 @@ Construir uma **arquitetura de dados em camadas (medalhão)** para ingestão, tr
     ├── resources/
     │   └── jobs/
     │       └── job_pipeline_cvm.yml
+    ├── tests/
+    │   └── test_config_parametros.py
     ├── databricks.yml
+    ├── ruff.toml
     └── README.md
 
 ---
@@ -84,7 +90,10 @@ Detalhes técnicos completos (sincronização de notebooks, compute serverless, 
 ✓ **Configuração centralizada** (`config_parametros.py`)  
 ✓ **Orquestrador de pipeline** (`000_orquestrador_pipeline.py`)  
 ✓ Download para Landing Zone (`003_download_cvm_para_landing.py`)  
-✓ Documentação de tabelas (`099_ddl_table_comments.py`)
+✓ Documentação de tabelas (`099_ddl_table_comments.py`)  
+✓ **CI/CD automatizado** (GitHub Actions - `.github/workflows/ci.yml`)  
+✓ **Testes unitários** (`tests/test_config_parametros.py`)  
+✓ **Linting e formatação** (Ruff - `ruff.toml`)
 
 **Pipeline de Dados:**
 

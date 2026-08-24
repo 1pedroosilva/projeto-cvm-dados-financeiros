@@ -1,0 +1,89 @@
+# Job Testes de Integração - Pipeline CVM
+# Propósito: Validação E2E (Bronze → Silver) em schemas isolados
+# Escopo: Pipeline DRE completo para ano 2010 (volume mínimo, execução rápida)
+# Estratégia: Fail-fast via depends_on - falha em teste bloqueia próximos
+
+resources:
+  jobs:
+    testes_integracao_cvm:
+      name: "[CI] Testes de Integração - Pipeline CVM"
+
+      # Configurações gerais do job
+      max_concurrent_runs: 1
+      timeout_seconds: 1800  # 30 minutos (testes são rápidos)
+
+      # Notificações
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+        # Não notificar em sucesso (job de teste roda frequentemente)
+
+      # Sem schedule - disparado via GitHub Actions ou manualmente
+      # schedule:
+      #   quartz_cron_expression: "0 0 2 * * ?"
+      #   timezone_id: "America/Sao_Paulo"
+      #   pause_status: PAUSED
+
+      # Definição de ambiente (variáveis de ambiente para todas as tasks)
+      environments:
+        - environment_key: test_env
+          spec:
+            client: "1"
+            dependencies:
+              - "SCHEMA_SUFFIX=_test"
+              - "ANOS_OVERRIDE=2010"
+
+      # Tasks do pipeline de testes
+      tasks:
+        # TASK 1: Criar schemas de teste
+        - task_key: criar_schemas_teste
+          notebook_task:
+            notebook_path: ../../05_apoio/001_ddl_create_tables.py
+            base_parameters: {}
+          environment_key: test_env
+
+        # TASK 2: Ingestão Bronze DRE para ano 2010
+        - task_key: test_bronze_dre_2010
+          depends_on:
+            - task_key: criar_schemas_teste
+          notebook_task:
+            notebook_path: ../../01_bronze/101_cvm_dfp_dre.py
+            base_parameters: {}
+          environment_key: test_env
+
+        # TASK 3: Transformação Silver DRE para ano 2010
+        - task_key: test_silver_dre_2010
+          depends_on:
+            - task_key: test_bronze_dre_2010
+          notebook_task:
+            notebook_path: ../../02_silver/201_cvm_dfp_dre.py
+            base_parameters: {}
+          environment_key: test_env
+
+        # TASK 4: Validações de integração (contagens, PKs, metadados)
+        - task_key: validacoes_integracao
+          depends_on:
+            - task_key: test_silver_dre_2010
+          notebook_task:
+            notebook_path: ../../06_testes/test_integracao_dre.py
+            base_parameters: {}
+          environment_key: test_env
+
+        # TASK 5: Limpar schemas de teste (COMENTADO - manter dados para debug)
+        # Descomente quando testes estiverem estáveis e você não precisar mais
+        # inspecionar os dados após falhas
+        #
+        # - task_key: limpar_schemas_teste
+        #   depends_on:
+        #     - task_key: validacoes_integracao
+        #   run_if: ALL_DONE  # Roda sempre, mesmo se testes falharem
+        #   notebook_task:
+        #     notebook_path: ../../06_testes/cleanup_schemas_teste.py
+        #     base_parameters: {}
+        #   environment_key: test_env
+
+      # Tags para organização
+      tags:
+        projeto: cvm-dados-financeiros
+        tipo: testes-integracao
+        ambiente: ci

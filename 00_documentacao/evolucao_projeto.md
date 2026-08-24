@@ -15,6 +15,41 @@ Registro cronológico de evolução do projeto para defesa em entrevistas:
 
 
 
+## 📅 23/08/2026 - CI/CD e Testes Automatizados
+
+### Contexto
+Projetório de portfólio para transição de carreira exige demonstrar não apenas código funcional, mas maturidade profissional com garantias automatizadas de qualidade. Implementações locais (máquina pessoal) de GitHub Actions e testes unitários já validadas e commitadas, agora sincronizadas via pull para o workspace Databricks.
+
+### Decisões
+* **GitHub Actions para CI** → Workflow `.github/workflows/ci.yml` executa linting e testes automaticamente a cada push/PR, garantindo qualidade contínua sem intervenção manual
+* **Ruff para linting e formatação** → Ferramenta moderna (escrita em Rust, extremamente rápida) substitui Flake8/Black/isort com configuração unificada em `ruff.toml`
+* **pytest para testes unitários** → Cobertura inicial em `test_config_parametros.py` valida funções críticas de configuração (mapeamento de demonstrações, anos disponíveis, colunas de metadados)
+* **Badge de status no README** → Indica visualmente saúde do CI na landing page do repositório
+
+### Implementado
+* Workflow CI (`.github/workflows/ci.yml`):
+  - Job 1: Lint com Ruff (verificação de estilo, imports, complexidade)
+  - Job 2: Testes com pytest (execução de suite unitária)
+  - Trigger: push e pull requests para branch main
+* Configuração Ruff (`ruff.toml`):
+  - Line length 120 caracteres
+  - Regras habilitadas: pycodestyle, pyflakes, isort, complexity
+  - Exclusões: `.git`, `.databricks`, `__pycache__`, `.old`
+* Testes unitários (`tests/test_config_parametros.py`):
+  - 52 linhas, cobertura de 4 funções críticas do módulo de configuração
+  - Valida mapeamento DRE/BPA/BPP, lista de anos 2021-2025, estrutura de colunas de controle
+* Ajustes em `config_parametros.py`:
+  - Refatoração para conformidade com regras de linting
+  - Melhorias de legibilidade (45 linhas modificadas)
+* Atualização `.gitignore`:
+  - Exclusão de arquivos de cache Python (`__pycache__`, `.pytest_cache`)
+  - Exclusão de diretórios Databricks (`.databricks`, `config`)
+
+### Key Insight
+CI/CD não é "extra" em projetos de portfólio profissionais — é demonstração de maturidade técnica. Recrutadores avaliam não apenas se o código funciona, mas se o candidato entende garantias de qualidade automatizadas, práticas de integração contínua e cultura de testes. GitHub Actions é gratuito para repositórios públicos (2000 minutos/mês), eliminando barreira de custo. Badge verde no README sinaliza "este projeto segue práticas profissionais" antes mesmo de abrir o código. Diferença entre "projeto de estudos" e "projeto de portfólio para entrevistas" está nestes detalhes de engenharia.
+
+---
+
 ## 📅 19/08/2026 - Refactor Silver: DELETE+APPEND → REPLACE WHERE
 
 ### Contexto
