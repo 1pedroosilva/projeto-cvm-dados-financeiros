@@ -4,16 +4,18 @@
 
 name: Testes de Integração
 
+# Trigger APENAS manual - não consome DBU em todo push
 on:
-  push:
-    branches:
-      - main
-      - develop
-  pull_request:
-    branches:
-      - main
-      - develop
-  workflow_dispatch:  # Permite execução manual
+  workflow_dispatch:  # Disparo manual via interface do GitHub
+    inputs:
+      ambiente:
+        description: 'Ambiente (dev/ci)'
+        required: false
+        default: 'ci'
+        type: choice
+        options:
+          - ci
+          - dev
 
 jobs:
   testes-integracao:
