@@ -54,35 +54,35 @@ def test_todos_os_anos_sao_inteiros_sem_repeticao():
 
 def test_comparacao_datetime_naive_vs_aware_apos_normalizacao():
     """Garante que a normalização naive → aware permite comparação segura.
-    
+
     Bug histórico: Spark TIMESTAMP vem como pandas.Timestamp naive ao entrar
     no Python. verificar_arquivo_existe_cvm retorna datetime aware (UTC).
     Comparação direta levanta TypeError.
-    
+
     Proteção: Este teste quebra se alguém remover a normalização defensiva
     em get_anos_com_atualizacao_cvm sem migrar a leitura do Spark.
     """
     from datetime import datetime, timezone
-    
+
     # Simula timestamp lido do Spark (sempre naive)
-    dt_naive = datetime(2026, 8, 23, 10, 31, 9)
+    dt_naive = datetime(2026, 8, 23, 10, 31, 9) # noqa: DTZ001
     assert dt_naive.tzinfo is None, "Pré-condição: datetime deve ser naive"
-    
+
     # Simula timestamp do header Last-Modified da CVM (sempre aware UTC)
     dt_aware = datetime(2026, 8, 23, 11, 0, 0, tzinfo=timezone.utc)
     assert dt_aware.tzinfo is not None, "Pré-condição: datetime deve ser aware"
-    
+
     # ❌ SEM normalização: comparação levanta TypeError
     try:
         _ = dt_aware > dt_naive
         assert False, "Comparação naive vs aware deveria levantar TypeError"
     except TypeError as e:
         assert "offset-naive and offset-aware" in str(e)
-    
+
     # ✓ COM normalização: comparação funciona
     dt_naive_normalizado = dt_naive.replace(tzinfo=timezone.utc)
     assert dt_naive_normalizado.tzinfo is not None
-    
+
     # Esta linha NUNCA pode levantar TypeError
     resultado = dt_aware > dt_naive_normalizado
     assert isinstance(resultado, bool), "Comparação deve retornar bool"
@@ -91,19 +91,19 @@ def test_comparacao_datetime_naive_vs_aware_apos_normalizacao():
 
 def test_normalizacao_preserva_o_valor_do_timestamp():
     """Adicionar tzinfo=UTC não muda o momento absoluto representado.
-    
+
     Spark TIMESTAMP armazena valores como UTC internamente. Quando Python
     lê como naive, está "esquecendo" que é UTC - a normalização restaura
     essa informação sem alterar o valor.
     """
     from datetime import datetime, timezone
-    
+
     # Timestamp naive representando "2026-08-23 10:31:09 UTC" (implícito)
-    dt_naive = datetime(2026, 8, 23, 10, 31, 9)
-    
+    dt_naive = datetime(2026, 8, 23, 10, 31, 9) # noqa: DTZ001
+
     # Normalizar para aware UTC
     dt_aware = dt_naive.replace(tzinfo=timezone.utc)
-    
+
     # Valores devem ser idênticos
     assert dt_naive.year == dt_aware.year
     assert dt_naive.month == dt_aware.month
@@ -111,7 +111,7 @@ def test_normalizacao_preserva_o_valor_do_timestamp():
     assert dt_naive.hour == dt_aware.hour
     assert dt_naive.minute == dt_aware.minute
     assert dt_naive.second == dt_aware.second
-    
+
     # Apenas tzinfo muda (None → UTC)
     assert dt_naive.tzinfo is None
     assert dt_aware.tzinfo == timezone.utc
