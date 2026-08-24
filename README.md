@@ -77,6 +77,25 @@ Detalhes técnicos completos (sincronização de notebooks, compute serverless, 
 
 ---
 
+## Testes de Integração
+
+O workflow `testes_integracao.yml` executa os notebooks do pipeline (Bronze → Silver) no Databricks e valida o funcionamento E2E.
+
+**Trigger**: Manual (`workflow_dispatch`) — não consome DBU em todo push.
+
+**Configuração necessária** (apenas uma vez):
+
+1. Gerar token no Databricks: **User Settings** → **Developer** → **Access tokens** → **Generate new token**
+2. Configurar secrets no GitHub: **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
+   ```
+   DATABRICKS_HOST = https://dbc-a4218100-86c9.cloud.databricks.com
+   DATABRICKS_TOKEN = <seu-token-gerado>
+   ```
+
+**Execução**: GitHub Actions → **Testes de Integração** → **Run workflow** → escolher ambiente (ci/dev)
+
+---
+
 ## Status Atual
 
 ### Implementado
