@@ -9,6 +9,11 @@ include:
   - resources/**/*.yml
 
 variables:
+  # Workspace
+  workspace_host:
+    description: "URL do workspace Databricks"
+    default: https://dbc-a4218100-86c9.cloud.databricks.com
+  
   # Catálogo Unity Catalog
   catalog:
     description: "Catálogo Unity Catalog para as tabelas do projeto"
@@ -24,7 +29,7 @@ variables:
     description: "Caminho do volume UC para Landing Zone"
     default: /Volumes/workspace/proj_cvm/landing
   
-  # Notificações
+  # Notificações (independente de run_as)
   notification_email:
     description: "Email para notificações de falha no pipeline"
     default: 1pedro.osilva@gmail.com
@@ -35,7 +40,7 @@ targets:
     mode: development
     default: true
     workspace:
-      host: https://dbc-a4218100-86c9.cloud.databricks.com
+      host: ${var.workspace_host}
     variables:
       catalog: workspace
       schema_prefix: proj_cvm_dev
@@ -44,7 +49,7 @@ targets:
   prod:
     mode: production
     workspace:
-      host: https://dbc-a4218100-86c9.cloud.databricks.com
+      host: ${var.workspace_host}
     variables:
       catalog: workspace
       schema_prefix: proj_cvm
@@ -52,4 +57,15 @@ targets:
     run_as:
       # Em produção, especificar service principal
       # user_name: service-principal@databricks.com
+      user_name: 1pedro.osilva@gmail.com
+  
+  # Ambiente de CI/CD
+  ci:
+    mode: development
+    workspace:
+      host: ${var.workspace_host}
+    variables:
+      catalog: workspace
+      schema_prefix: proj_cvm_ci
+    run_as:
       user_name: 1pedro.osilva@gmail.com
