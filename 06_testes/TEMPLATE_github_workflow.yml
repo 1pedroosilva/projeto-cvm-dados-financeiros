@@ -1,0 +1,109 @@
+# GitHub Actions Workflow - Testes de Integração Pipeline CVM
+# Dispara job de testes no Databricks via CLI e aguarda resultado
+# Gera badge de status automático para README
+
+name: Testes de Integração
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:  # Permite execução manual
+
+jobs:
+  testes-integracao:
+    runs-on: ubuntu-latest
+    name: Executar Testes de Integração
+
+    steps:
+      # 1. Checkout do código
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      # 2. Configurar Databricks CLI
+      - name: Configurar Databricks CLI
+        uses: databricks/setup-cli@main
+
+      # 3. Autenticar com Databricks
+      - name: Autenticar Databricks
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          echo "Configurando autenticação Databricks..."
+
+      # 4. Deploy do Bundle (atualiza job com última versão do código)
+      - name: Deploy Databricks Bundle
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          cd resources
+          databricks bundle deploy --target ci
+
+      # 5. Disparar Job de Testes de Integração
+      - name: Disparar Job de Testes
+        id: run-job
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          JOB_ID=$(databricks jobs list --output json | jq -r '.jobs[] | select(.settings.name == "[CI] Testes de Integração - Pipeline CVM") | .job_id')
+          RUN_OUTPUT=$(databricks jobs run-now --job-id $JOB_ID --output json)
+          RUN_ID=$(echo $RUN_OUTPUT | jq -r '.run_id')
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+
+      # 6. Aguardar conclusão do Job
+      - name: Aguardar conclusão do Job
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          RUN_ID=${{ steps.run-job.outputs.run_id }}
+          MAX_WAIT=1800
+          ELAPSED=0
+          INTERVAL=30
+          
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            RUN_STATUS=$(databricks runs get --run-id $RUN_ID --output json)
+            STATE=$(echo $RUN_STATUS | jq -r '.state.life_cycle_state')
+            RESULT=$(echo $RUN_STATUS | jq -r '.state.result_state // "RUNNING"')
+            
+            if [ "$STATE" = "TERMINATED" ]; then
+              if [ "$RESULT" = "SUCCESS" ]; then
+                echo "✅ Testes de integração PASSARAM"
+                exit 0
+              else
+                echo "❌ Testes de integração FALHARAM"
+                exit 1
+              fi
+            fi
+            
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+          
+          exit 1
+
+      # 7. Comentar PR com resultado (apenas em PRs)
+      - name: Comentar resultado em PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${{ secrets.DATABRICKS_HOST }}/#job/${{ steps.run-job.outputs.job_id }}/run/${{ steps.run-job.outputs.run_id }}`;
+            const status = '${{ job.status }}' === 'success' ? '✅ PASSARAM' : '❌ FALHARAM';
+            const body = `## Testes de Integração ${status}\n\n[Ver detalhes no Databricks](${runUrl})`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
