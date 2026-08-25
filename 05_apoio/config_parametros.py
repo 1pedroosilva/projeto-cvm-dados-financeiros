@@ -1,4 +1,13 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
+# MAGIC %md
+# MAGIC
+
+# COMMAND ----------
+
 # ============================================================================
 # Configuração Centralizada - Pipeline CVM
 # ============================================================================
@@ -352,17 +361,39 @@ def inicializar_anos_processar(force_anos: list = None, silent: bool = False) ->
     """
     global ANOS_PROCESSAR
 
-    # Verificar override via variável de ambiente
+    # PRIORIDADE 1: Widget ANOS_OVERRIDE (para jobs/testes)
+    try:
+        anos_override_widget = dbutils.widgets.get('ANOS_OVERRIDE').strip()
+    except:
+        anos_override_widget = ''
+
+    # PRIORIDADE 2: Variável de ambiente
     anos_override_env = os.getenv('ANOS_OVERRIDE', '').strip()
+
+    # PRIORIDADE 3: Widget SCHEMA_SUFFIX (para schemas de teste)
+    try:
+        schema_suffix = dbutils.widgets.get('SCHEMA_SUFFIX').strip()
+        if schema_suffix:
+            global SCHEMA_BRONZE, SCHEMA_SILVER, SCHEMA_GOLD
+            SCHEMA_BRONZE = f"bronze_cvm_dfp{schema_suffix}"
+            SCHEMA_SILVER = f"silver_cvm_dfp{schema_suffix}"
+            SCHEMA_GOLD = f"gold_cvm_dfp{schema_suffix}"
+            if not silent:
+                print(f"🧪 Schemas de teste: BRONZE={SCHEMA_BRONZE}, SILVER={SCHEMA_SILVER}")
+    except:
+        pass  # Widget não existe, usar schemas produção
+
+    # Consolidar ANOS_OVERRIDE (widget tem prioridade sobre env)
+    anos_override = anos_override_widget or anos_override_env
 
     if force_anos:
         # Override via parâmetro
         ANOS_PROCESSAR = sorted(force_anos)
         if not silent:
             print(f"🔧 ANOS_PROCESSAR (override manual): {ANOS_PROCESSAR}")
-    elif anos_override_env:
-        # Override via variável de ambiente
-        ANOS_PROCESSAR = sorted([int(ano.strip()) for ano in anos_override_env.split(',')])
+    elif anos_override:
+        # Override via widget ou variável de ambiente
+        ANOS_PROCESSAR = sorted([int(ano.strip()) for ano in anos_override.split(',')])
         if not silent:
             print(f"🔧 ANOS_PROCESSAR (variável ambiente): {ANOS_PROCESSAR}")
     else:

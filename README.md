@@ -2,6 +2,10 @@
 
 [![CI](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/ci.yml/badge.svg)](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/ci.yml)
 
+
+![Testes Databricks](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/testes_integracao.yml/badge.svg)
+
+
 ## Visão Geral
 
 Projeto de gestão e análise de dados financeiros de companhias abertas brasileiras, extraídos do portal de **Dados Abertos da CVM** (Comissão de Valores Mobiliários).
@@ -46,6 +50,10 @@ Construir uma **arquitetura de dados em camadas (medalhão)** para ingestão, tr
     │   ├── 003_download_cvm_para_landing.py
     │   ├── 099_ddl_table_comments.py
     │   └── config_parametros.py
+    ├── 06_testes/
+    │   ├── criar_schemas_teste.py
+    │   ├── test_integracao_dre.py
+    │   └── TEMPLATE_github_workflow.yml
     ├── resources/
     │   └── jobs/
     │       └── job_pipeline_cvm.yml
