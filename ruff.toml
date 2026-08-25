@@ -6,6 +6,7 @@
 include = ["tests/**/*.py", "05_apoio/config_parametros.py"]
 
 line-length = 100
+builtins = ["dbutils"]
 
 [lint]
 select = ["E", "F", "W", "I", "DTZ"]
