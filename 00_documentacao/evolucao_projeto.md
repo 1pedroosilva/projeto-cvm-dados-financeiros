@@ -50,6 +50,36 @@ CI/CD não é "extra" em projetos de portfólio profissionais — é demonstraç
 
 ---
 
+## 📅 24/08/2026 - Testes de Integração E2E
+
+### Contexto
+Testes unitários (pytest) validam módulos isolados, mas não garantem que o pipeline completo funciona ponta a ponta. Para portfólio profissional, demonstrar testes de integração que rodam no Databricks real — não apenas mocks locais — prova que o pipeline é executável e validado em ambiente produtivo.
+
+### Decisões
+* **Pasta dedicada `06_testes/`** → Separação clara entre testes unitários (pytest local em `tests/`) e testes de integração E2E (notebooks Databricks executados no workspace)
+* **Schemas isolados de teste** → Sufixo `_test` nos schemas (`bronze_cvm_dfp_test`, `silver_cvm_dfp_test`) evita poluir dados de produção durante testes
+* **Workflow GitHub Actions manual** → Trigger `workflow_dispatch` (não automático) para controlar consumo de DBUs — testes E2E são executados sob demanda, não a cada push
+* **Job dedicado no Databricks** → `[CI] Testes de Integração - Pipeline CVM` executa notebooks Bronze+Silver em ano específico (2010, volume mínimo) com 5 validações de qualidade
+* **Badge de status no README** → Indicador visual de saúde dos testes de integração, complementando badge de CI/lint
+
+### Implementado
+* Notebooks de teste (`06_testes/`):
+  - `criar_schemas_teste.py`: Cria schemas isolados com sufixo configurável
+  - `test_integracao_dre.py`: Valida pipeline DRE E2E (Bronze existe, Silver existe, contagens batem, PKs únicas, metadados populados)
+  - `TEMPLATE_github_workflow.yml`: Template para referência
+* Workflow GitHub Actions (`.github/workflows/testes_integracao.yml`):
+  - Deploy do bundle antes de rodar testes (garante código atualizado)
+  - Disparo do job via Databricks CLI
+  - Aguarda conclusão e reporta status (timeout 30min)
+* Job Databricks criado: ID 176285066429591 (`[CI] Testes de Integração - Pipeline CVM`)
+* Target `ci` configurado no `databricks.yml` com `schema_prefix: proj_cvm_ci`
+* README atualizado com instruções de configuração de secrets (`DATABRICKS_HOST`, `DATABRICKS_TOKEN`)
+
+### Key Insight
+Testes de integração E2E no Databricks real (não mocks) são o diferencial entre "código que parece funcionar" e "pipeline validado em produção". Schemas isolados com sufixo evitam contaminar dados reais — padrão essencial para ambientes corporativos onde teste e produção compartilham workspace. Workflow manual (não automático) equilibra validação rigorosa com controle de custo: DBUs são consumidos apenas quando necessário, não a cada commit. Para portfólio, isso demonstra consciência de custo e maturidade operacional além de apenas "fazer funcionar".
+
+---
+
 ## 📅 19/08/2026 - Refactor Silver: DELETE+APPEND → REPLACE WHERE
 
 ### Contexto

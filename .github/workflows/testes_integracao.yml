@@ -45,7 +45,6 @@ jobs:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: |
-          cd resources
           databricks bundle deploy --target ci
 
       # 5. Disparar Job de Testes de Integração

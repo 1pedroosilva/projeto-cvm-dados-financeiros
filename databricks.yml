@@ -39,8 +39,6 @@ targets:
   dev:
     mode: development
     default: true
-    workspace:
-      host: ${var.workspace_host}
     variables:
       catalog: workspace
       schema_prefix: proj_cvm_dev
@@ -48,8 +46,6 @@ targets:
   # Ambiente de produção
   prod:
     mode: production
-    workspace:
-      host: ${var.workspace_host}
     variables:
       catalog: workspace
       schema_prefix: proj_cvm
@@ -62,8 +58,6 @@ targets:
   # Ambiente de CI/CD
   ci:
     mode: development
-    workspace:
-      host: ${var.workspace_host}
     variables:
       catalog: workspace
       schema_prefix: proj_cvm_ci
