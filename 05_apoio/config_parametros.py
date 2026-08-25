@@ -364,7 +364,7 @@ def inicializar_anos_processar(force_anos: list = None, silent: bool = False) ->
     # PRIORIDADE 1: Widget ANOS_OVERRIDE (para jobs/testes)
     try:
         anos_override_widget = dbutils.widgets.get('ANOS_OVERRIDE').strip()
-    except:
+    except Exception:
         anos_override_widget = ''
 
     # PRIORIDADE 2: Variável de ambiente
@@ -380,7 +380,7 @@ def inicializar_anos_processar(force_anos: list = None, silent: bool = False) ->
             SCHEMA_GOLD = f"gold_cvm_dfp{schema_suffix}"
             if not silent:
                 print(f"🧪 Schemas de teste: BRONZE={SCHEMA_BRONZE}, SILVER={SCHEMA_SILVER}")
-    except:
+    except Exception:
         pass  # Widget não existe, usar schemas produção
 
     # Consolidar ANOS_OVERRIDE (widget tem prioridade sobre env)
