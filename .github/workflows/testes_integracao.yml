@@ -54,7 +54,8 @@ jobs:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: |
-          JOB_ID=$(databricks jobs list --output json | jq -r '.jobs[] | select(.settings.name == "[CI] Testes de Integração - Pipeline CVM") | .job_id')
+          # Job ID fixo (job já existe no workspace)
+          JOB_ID="176285066429591"
           RUN_OUTPUT=$(databricks jobs run-now --job-id $JOB_ID --output json)
           RUN_ID=$(echo $RUN_OUTPUT | jq -r '.run_id')
           echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
