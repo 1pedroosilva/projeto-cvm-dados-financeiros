@@ -1,196 +1,183 @@
-﻿# Projeto CVM - Dados Financeiros
+# Projeto CVM - Dados Financeiros
 
-[![CI](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/ci.yml/badge.svg)](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/ci.yml)
+Pipeline de ingestão e transformação de demonstrações financeiras de companhias abertas brasileiras, publicadas pela Comissão de Valores Mobiliários (CVM). Arquitetura medalhão (bronze, silver, gold) implementada em Databricks com Delta Lake e Unity Catalog.
 
+## O que é este projeto
 
-![Testes Databricks](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/testes_integracao.yml/badge.svg)
+Processa demonstrações financeiras padronizadas (DFP) da CVM:
+* **DRE** (Demonstração do Resultado do Exercício) - receitas, despesas e resultado
+* **BPA** (Balanço Patrimonial Ativo) - ativos
+* **BPP** (Balanço Patrimonial Passivo) - passivos e patrimônio líquido
 
+Os dados são extraídos do [Portal de Dados Abertos da CVM](https://dados.cvm.gov.br/), processados em camadas (bronze → silver) e armazenados em Unity Catalog para análise.
 
-## Visão Geral
+## Arquitetura
 
-Projeto de gestão e análise de dados financeiros de companhias abertas brasileiras, extraídos do portal de **Dados Abertos da CVM** (Comissão de Valores Mobiliários).
+### Camadas de Dados
 
-O pipeline implementa a **arquitetura medalhão** (Bronze → Silver → Gold) com análises exploratórias intermediárias para validação de qualidade antes de promover dados para camadas downstream.
+```
+[CVM Portal] → [Landing Zone] → [Bronze] → [Silver] → [Gold]
+     ZIP          UC Volume      Raw Data   Curated    KPIs
+```
 
----
+**Bronze** (`01_bronze/`): Preservação dos dados brutos da fonte
+* 3 notebooks: `101_cvm_dfp_dre`, `102_cvm_dfp_bpa`, `103_cvm_dfp_bpp`
+* Tabelas: `proj_cvm_01_bronze.101_dre_dfp`, `102_bpa_dfp`, `103_bpp_dfp`
+* Estratégia: DELETE WHERE ano + APPEND (idempotente)
+* Guardrails: arquivo vazio, schema inválido
 
-## Objetivo
+**Silver** (`02_silver/`): Dados limpos, tipados e enriquecidos
+* 3 notebooks: `201_cvm_dfp_dre`, `202_cvm_dfp_bpa`, `203_cvm_dfp_bpp`
+* Tabelas: `proj_cvm_02_silver.201_dre_dfp`, `202_bpa_dfp`, `203_bpp_dfp`
+* Transformações: conversão de tipos, filtro de duplicatas, colunas derivadas (ANO, TRIMESTRE, MES)
+* Estratégia: REPLACE WHERE (substituição atômica por período)
+* Guardrails: bronze vazia para o ano
 
-Construir uma **arquitetura de dados em camadas (medalhão)** para ingestão, transformação e análise de demonstrações financeiras padronizadas (DFP) de empresas de capital aberto no Brasil.
+**Gold** (`03_gold/`): Em desenvolvimento (métricas e KPIs)
 
----
+**Landing Zone**: `/Volumes/workspace/proj_cvm/landing/dfp/` - preservação de arquivos originais ZIP com metadados HTTP
 
-## Estrutura do Projeto
+### Estrutura do Repositório
 
-    projeto-cvm-dados-financeiros/
-    ├── .github/
-    │   └── workflows/
-    │       └── ci.yml
-    ├── 00_documentacao/
-    │   ├── evolucao_projeto.md
-    │   ├── tecnica/
-    │   │   ├── arquitetura.md
-    │   │   └── guardrails.md
-    │   └── negocio/
-    │       └── dicionario_dados.md
-    ├── 01_bronze/
-    │   ├── 101_cvm_dfp_dre.py
-    │   ├── 102_cvm_dfp_bpa.py
-    │   └── 103_cvm_dfp_bpp.py
-    ├── 02_silver/
-    │   ├── 201_cvm_dfp_dre.py
-    │   ├── 202_cvm_dfp_bpa.py
-    │   └── 203_cvm_dfp_bpp.py
-    ├── 04_exploracao/
-    │   └── EDA_001_analise_dre_silver.ipynb
-    ├── 05_apoio/
-    │   ├── 000_orquestrador_pipeline.py
-    │   ├── 001_ddl_create_tables.py
-    │   ├── 002_ddl_controle_ingestao.py
-    │   ├── 003_download_cvm_para_landing.py
-    │   ├── 099_ddl_table_comments.py
-    │   └── config_parametros.py
-    ├── 06_testes/
-    │   ├── criar_schemas_teste.py
-    │   ├── test_integracao_dre.py
-    │   └── TEMPLATE_github_workflow.yml
-    ├── resources/
-    │   └── jobs/
-    │       └── job_pipeline_cvm.yml
-    ├── tests/
-    │   └── test_config_parametros.py
-    ├── databricks.yml
-    ├── ruff.toml
-    └── README.md
+```
+projeto-cvm-dados-financeiros/
+├── 00_documentacao/
+│   ├── tecnica/
+│   │   ├── arquitetura.md      # Especificação técnica completa
+│   │   └── guardrails.md       # Validações de qualidade
+│   └── negocio/
+│       └── dicionario_dados.md # Conceitos de negócio CVM/DFP
+├── 01_bronze/                   # Ingestão bruta (3 notebooks)
+├── 02_silver/                   # Transformação (3 notebooks)
+├── 03_gold/                     # Agregação (em desenvolvimento)
+├── 04_exploracao/               # Análises exploratórias
+├── 05_apoio/
+│   ├── 000_orquestrador_pipeline.py
+│   ├── 001_ddl_create_tables.py
+│   ├── 002_ddl_controle_ingestao.py
+│   ├── 003_download_cvm_para_landing.py
+│   ├── 099_ddl_table_comments.py
+│   └── config_parametros.py
+├── resources/jobs/
+│   ├── job_pipeline_cvm.yml          # Pipeline completo (8 tasks)
+│   └── job_testes_integracao.yml     # Testes E2E
+├── tests/
+│   └── test_config_parametros.py
+├── databricks.yml               # Configuração DAB
+├── ruff.toml                    # Linter
+└── LICENSE                      # MIT
+```
 
----
+## Stack Tecnológico
 
-## Fontes de Dados
+* **Plataforma**: Databricks (Serverless Compute)
+* **Armazenamento**: Delta Lake + Unity Catalog
+* **Processamento**: Apache Spark (PySpark)
+* **Orquestração**: Databricks Workflows (Databricks Asset Bundle)
+* **Governança**: Unity Catalog (schemas, volumes, controle de ingestão)
 
-### CVM - Demonstrações Financeiras Padronizadas (DFP)
+## Configuração
 
-* **Portal**: [Dados Abertos CVM](https://dados.cvm.gov.br/)
-* **Demonstrações Implementadas**:
-  - **DRE** (Demonstração do Resultado do Exercício)
-  - **BPA** (Balanço Patrimonial Ativo)
-  - **BPP** (Balanço Patrimonial Passivo)
+### Databricks Asset Bundle (DAB)
 
----
+O projeto usa DAB para gerenciar infraestrutura como código. 3 ambientes configurados:
 
-## Deploy e Execução
+**dev** (padrão):
+* Catálogo: `workspace`
+* Schemas: `proj_cvm_dev_01_bronze`, `proj_cvm_dev_02_silver`
+* Landing Zone: `/Volumes/workspace/proj_cvm/landing`
 
-O pipeline roda como um Databricks Job (`Pipeline CVM - DFP`) gerenciado via **Databricks Asset Bundles (DABs)**, definido em `databricks.yml` e `resources/jobs/job_pipeline_cvm.yml`. Mudanças em tasks, schedule ou notificações são feitas nesses arquivos e aplicadas com `databricks bundle deploy`, não editando o job diretamente na interface do Databricks.
+**prod**:
+* Catálogo: `workspace`
+* Schemas: `proj_cvm_01_bronze`, `proj_cvm_02_silver`
 
-Detalhes técnicos completos (sincronização de notebooks, compute serverless, modo de edição) em [00_documentacao/tecnica/arquitetura.md](00_documentacao/tecnica/arquitetura.md).
+**ci**:
+* Catálogo: `workspace`
+* Schemas: `proj_cvm_ci_01_bronze`, `proj_cvm_ci_02_silver`
 
----
+Configuração em `databricks.yml` e `resources/jobs/*.yml`.
 
-## Testes de Integração
+## Execução
 
-O workflow `testes_integracao.yml` executa os notebooks do pipeline (Bronze → Silver) no Databricks e valida o funcionamento E2E.
+### Via Databricks Workflows (Recomendado)
 
-**Trigger**: Manual (`workflow_dispatch`) — não consome DBU em todo push.
+O job `pipeline_cvm_completo` orquestra o pipeline completo:
 
-**Configuração necessária** (apenas uma vez):
+1. **Orquestração**: Detecção inteligente de anos a processar (tabela de controle)
+2. **Download**: Arquivos CVM para Landing Zone
+3. **Bronze**: Ingestão paralela de DRE, BPA, BPP
+4. **Silver**: Transformação paralela de DRE, BPA, BPP
 
-1. Gerar token no Databricks: **User Settings** → **Developer** → **Access tokens** → **Generate new token**
-2. Configurar secrets no GitHub: **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
-   ```
-   DATABRICKS_HOST = https://dbc-a4218100-86c9.cloud.databricks.com
-   DATABRICKS_TOKEN = <seu-token-gerado>
-   ```
+**Schedule**: Diário às 3h (América/São_Paulo), pausado por padrão.
 
-**Execução**: GitHub Actions → **Testes de Integração** → **Run workflow** → escolher ambiente (ci/dev)
+**Deploy via DAB**:
+```bash
+# Validar configuração
+databricks bundle validate -t dev
 
----
+# Deploy para ambiente dev
+databricks bundle deploy -t dev
 
-## Status Atual
+# Executar job manualmente
+databricks bundle run pipeline_cvm_completo -t dev
+```
 
-### Implementado
+### Testes de Integração
 
-**Infraestrutura e Governança:**
+Job `testes_integracao_cvm` valida pipeline Bronze→Silver para DRE (ano 2010):
 
-✓ Estrutura de pastas numerada (00_, 01_, 02_, 03_, 04_, 05_)  
-✓ **Landing Zone** em Unity Catalog Volume (`/Volumes/workspace/proj_cvm/landing/`)  
-✓ Scripts DDL (001_ddl_create_tables.py + 002_ddl_controle_ingestao.py)  
-✓ Tabela de **controle de ingestão** (`proj_cvm_05_apoio.controle_ingestao`)  
-✓ **Configuração centralizada** (`config_parametros.py`)  
-✓ **Orquestrador de pipeline** (`000_orquestrador_pipeline.py`)  
-✓ Download para Landing Zone (`003_download_cvm_para_landing.py`)  
-✓ Documentação de tabelas (`099_ddl_table_comments.py`)  
-✓ **CI/CD automatizado** (GitHub Actions - `.github/workflows/ci.yml`)  
-✓ **Testes unitários** (`tests/test_config_parametros.py`)  
-✓ **Linting e formatação** (Ruff - `ruff.toml`)
+```bash
+# Deploy job de testes
+databricks bundle deploy -t ci
 
-**Pipeline de Dados:**
+# Executar testes
+databricks bundle run testes_integracao_cvm -t ci
+```
 
-✓ **Bronze - DRE** com versionamento (notebook `101_cvm_dfp_dre.py`)
-  - Tabela: `proj_cvm_01_bronze.101_dre_dfp`
-  - **Append-only** com colunas `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts`
+## Validações e Qualidade
 
-✓ **Bronze - BPA** com versionamento (notebook `102_cvm_dfp_bpa.py`)
-  - Tabela: `proj_cvm_01_bronze.102_bpa_dfp`
-  - **Append-only** com colunas `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts`
+### Guardrails
 
-✓ **Silver - DRE** transformada (notebook `201_cvm_dfp_dre.py`)
-  - Tabela: `proj_cvm_02_silver.201_dre_dfp`
-  - Filtro de versão mais recente + **Gravação atômica por período**
+**Bronze**:
+* Arquivo vazio → PARA (preserva Bronze)
+* Schema inválido (colunas críticas faltando) → PARA
+* Implementação: função `validar_e_projetar_schema()` em `config_parametros.py`
 
-✓ **Silver - BPA** transformada (notebook `202_cvm_dfp_bpa.py`)
-  - Tabela: `proj_cvm_02_silver.202_bpa_dfp`
-  - Filtro de versão mais recente + **Gravação atômica por período**
+**Silver**:
+* Bronze vazia para o ano → SKIP (preserva Silver)
 
-✓ **Silver - BPP** transformada (notebook `203_cvm_dfp_bpp.py`)
-  - Tabela: `proj_cvm_02_silver.203_bpp_dfp`
-  - Filtro de versão mais recente + **Gravação atômica por período**
+Detalhes em [`00_documentacao/tecnica/guardrails.md`](00_documentacao/tecnica/guardrails.md).
 
-**Documentação:**
+### Rastreamento
 
-✓ Projeto: README.md + arquitetura.md + dicionario_dados.md + guardrails.md  
-✓ Operacional: **evolucao_projeto.md** (registro cronológico de evolução)
+Tabela de controle `proj_cvm_05_apoio.controle_ingestao` registra:
+* Cada ingestão (fonte, ano, timestamp, versão)
+* Erros (status ERROR, mensagem truncada em 500 chars)
+* Metadados da fonte (last_modified via HTTP)
 
-**Análises Exploratórias:**
+## Fonte de Dados
 
-✓ **EDA_001_analise_dre_silver** (análise de qualidade da camada Silver DRE)
-  - 9 frentes de validação investigadas
-  - Detalhes em `04_exploracao/EDA_001_analise_dre_silver.ipynb`
+**Origem**: [Portal de Dados Abertos da CVM](https://dados.cvm.gov.br/)
 
----
+**URL**: `https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/DFP/DADOS/dfp_cia_aberta_{ANO}.zip`
 
-## Próximos Passos
+**Formato**: ZIP contendo CSVs (encoding ISO-8859-1, separador `;`)
 
-* Normalizar escalas monetárias na transformação Silver DRE
-* Adicionar classificação hierárquica (**TOTALIZADORA/ANALÍTICA**) na Silver DRE
-* Executar **backfill** Bronze DRE para período 2021-2023
-* Implementar camada **Gold** (métricas e KPIs)
-* Expandir ingestão para outras demonstrações (**DFC**, **DMPL**)
-* Criar dashboards de análise no **Genie Spaces**
+**Periodicidade**: Anual (DFP = Demonstrações Financeiras Padronizadas anuais)
 
----
+**Demonstrações processadas**:
+* `dfp_cia_aberta_DRE_con_{ANO}.csv` - DRE consolidada
+* `dfp_cia_aberta_BPA_con_{ANO}.csv` - Balanço Patrimonial Ativo consolidado
+* `dfp_cia_aberta_BPP_con_{ANO}.csv` - Balanço Patrimonial Passivo consolidado
 
-## Documentação Técnica
+Detalhes sobre estrutura dos dados e conceitos de negócio em [`00_documentacao/negocio/dicionario_dados.md`](00_documentacao/negocio/dicionario_dados.md).
 
-Para detalhes sobre arquitetura, padrões, convenções e fluxo de dados:
+## Documentação Complementar
 
-* **Frameworks e Padrões Universais (Tipo 1 - Conceitual)**: Ver projeto [databricks-genie-skills](https://github.com/1pedroosilva/databricks-genie-skills)
-  - Skills reutilizáveis entre projetos (nomenclaturas, estrutura notebooks, revisão código 4 frentes, resiliência operacional, arquitetura medalhão, Unity Catalog, protocolo atualização)
-  - Investigação técnica completa sobre **Databricks Genie Code Skill Registry**
-  - Frameworks universais não duplicados neste projeto (fonte única)
+* **Arquitetura técnica**: [`00_documentacao/tecnica/arquitetura.md`](00_documentacao/tecnica/arquitetura.md)
+* **Guardrails e validações**: [`00_documentacao/tecnica/guardrails.md`](00_documentacao/tecnica/guardrails.md)
+* **Dicionário de dados e negócio**: [`00_documentacao/negocio/dicionario_dados.md`](00_documentacao/negocio/dicionario_dados.md)
 
-* **Arquitetura e Padrões Técnicos**: Ver [00_documentacao/tecnica/arquitetura.md](00_documentacao/tecnica/arquitetura.md)
-  - Camadas Medalhão (**Bronze/Silver/Gold**)
-  - **Landing Zone** e versionamento
-  - Stack tecnológico
-  - Convenções de numeração (notebooks, tabelas)
-  - Princípio **DRY** em nomenclatura
-  - Estrutura de notebooks
-  - Estratégias de gravação
+## Licença
 
-* **Evolução do Projeto**: Ver [00_documentacao/evolucao_projeto.md](00_documentacao/evolucao_projeto.md)
-  - Registro cronológico de desenvolvimento
-  - Decisões arquiteturais
-  - Aprendizados técnicos
-
-
-* **Dicionário de Dados**: Ver [00_documentacao/negocio/dicionario_dados.md](00_documentacao/negocio/dicionario_dados.md)
-  - Metadados de negócio
+MIT License - veja [`LICENSE`](LICENSE) para detalhes.

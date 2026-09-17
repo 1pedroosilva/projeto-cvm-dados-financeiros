@@ -565,7 +565,7 @@ Versionamento é decisão arquitetural binária: ou Bronze é append-only + Silv
 * README atualizado com nova estrutura
 
 ### Key Insight
-DDL explícito separa a definição de estruturas da carga de dados, em vez de deixar o Spark inferir o schema a cada escrita.
+O schema fica declarado e auditável antes da primeira carga, em vez de inferido pelo Spark a cada execução.
 
 ---
 
@@ -695,7 +695,7 @@ Pipeline processa anos fixos (hardcoded). Não detecta novos anos da CVM nem arq
 * Notebooks downstream importam `ANOS_PROCESSAR` via `%run`
 
 ### Key Insight
-Orquestrador é pre-flight check que elimina intervenção manual. Pipeline "acorda" sozinho quando CVM publica novo ano ou corrige arquivo histórico. Padrão maduro de observabilidade.
+Orquestrador é pre-flight check que elimina intervenção manual. Pipeline "acorda" sozinho quando CVM publica novo ano ou corrige arquivo histórico.
 
 ---
 
