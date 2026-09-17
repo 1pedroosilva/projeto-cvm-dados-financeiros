@@ -471,7 +471,7 @@ def apply_schema_migration_if_needed():
 * **Limitação do Delta Lake**: ALTER COLUMN TYPE não suporta essa mudança de tipo
 
 **Alternativas consideradas e rejeitadas**:
-1. Manter schema STRING: Preserva metadados, mas DDL diverge de implementação (confuso, não profissional)
+1. Manter schema STRING: Preserva metadados, mas DDL diverge de implementação (tipos declarados não correspondem aos casts no código)
 2. CTAS sem DROP: Cria nova tabela, perde metadados igualmente, não resolve o problema
 3. Documentar como "precisa intervenção manual": Quebra objetivo de código executável
 
