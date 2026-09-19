@@ -172,12 +172,16 @@ def get_anos_com_atualizacao_cvm(
         for row in registros:
             ano = row['ano']
             last_modified_local = row['last_modified_cvm']  # Já vem como datetime do TIMESTAMP
+            
+            # Garantir que last_modified_local seja offset-aware para comparação
+            if last_modified_local and not last_modified_local.tzinfo:
+                last_modified_local = last_modified_local.replace(tzinfo=timezone.utc)
 
             url = get_url_arquivo_cvm(ano)
             existe, last_modified_cvm, _ = verificar_arquivo_existe_cvm(url)
 
             if existe and last_modified_cvm:
-                # Comparação entre datetime objects (segura após DDL corrigido para TIMESTAMP)
+                # Comparação entre datetime objects (ambos offset-aware)
                 if last_modified_local is None or last_modified_cvm > last_modified_local:
                     anos_atualizados.append(ano)
 

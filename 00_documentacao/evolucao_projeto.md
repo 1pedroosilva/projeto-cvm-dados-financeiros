@@ -15,6 +15,28 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 
 
+## 📅 19/09/2026 - Auditoria de Jobs, Versionamento e Bug Off-by-One
+
+### Contexto
+Após configuração e teste dos jobs diário (348419458655416) e semanal (890867014997453), foi necessário esclarecer responsabilidades dos notebooks de ingestão (003 vs 004), confirmar que o versionamento Bronze→Silver funciona corretamente, e investigar discrepância entre configuração de janela temporal (5 anos) e resultado observado (3 anos processados).
+
+### Decisões
+* **003_download permanece como notebook de teste/CI** → Usado apenas por jobs DAB ([dev], [CI], [proj_cvm_ci]); jobs de produção (diário/semanal) não o referenciam. Manter como está.
+* **Não alterar mais os jobs** → Jobs diário e semanal estão configurados, testados e validados. Decisão de congelar configuração.
+* **Bug off-by-one na janela temporal NÃO corrigido agora** → `JANELA_ANOS_RELEVANTE = 5` gera 6 anos na prática (`ano_atual - 5` inclui ano_atual, totalizando 6). Decisão do usuário: não corrigir neste momento.
+* **Versionamento Bronze→Silver confirmado correto** → Bronze grava com APPEND (preserva histórico de versões); Silver aplica Window Function (`PARTITION BY chave_natural ORDER BY _versao_ingestao DESC`, `row_number() == 1`) para ler apenas a versão mais recente.
+
+### Implementado
+* Mapeamento completo de jobs ativos no workspace: 2 de produção (diário/semanal via UI) + 4 de teste/CI (via DAB)
+* Confirmado que 003_download é referenciado apenas em `resources/jobs/job_pipeline_cvm.yml` (DAB), nunca nos jobs manuais
+* Confirmado fluxo de versionamento: Bronze adiciona `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts` → Silver filtra versão mais recente → grava com REPLACE WHERE por ano
+* Bug documentado mas não corrigido: `ano_inicio_janela = ano_atual - JANELA_ANOS_RELEVANTE` deveria ser `ano_atual - JANELA_ANOS_RELEVANTE + 1` para gerar exatamente 5 anos
+
+### Key Insight
+Separar jobs de teste (DAB/CI) de jobs de produção (manuais via UI) é uma estratégia válida, mas exige documentação clara de qual notebook serve qual propósito — sem isso, notebook 003 parece redundante quando na verdade atende um contexto diferente (validação de código vs execução de dados).
+
+---
+
 ## 📅 23/08/2026 - CI/CD e Testes Automatizados
 
 ### Contexto

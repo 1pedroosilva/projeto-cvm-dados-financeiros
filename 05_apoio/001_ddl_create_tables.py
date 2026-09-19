@@ -294,3 +294,72 @@ COMMENT 'BPA transformado - Dados limpos, tipados e enriquecidos com colunas tem
 """)
 
 print("✅ Tabela proj_cvm_02_silver.202_bpa_dfp criada")
+
+# COMMAND ----------
+
+# DBTITLE 1,CRIAÇÃO DA TABELA DE OBSERVABILIDADE
+# ============================================================================
+# TABELA DE OBSERVABILIDADE (schema de apoio)
+# ============================================================================
+# Rastreia todas as execuções do pipeline com métricas detalhadas
+# Alimentada pelo notebook 004_verificacao_diaria_landing e pelos notebooks bronze/silver
+
+# Schema de apoio (criado também no 002_ddl_controle_ingestao — idempotente)
+spark.sql("""
+CREATE SCHEMA IF NOT EXISTS proj_cvm_05_apoio
+COMMENT 'Schema para tabelas de apoio, controle e configuração do pipeline'
+""")
+
+# Tabela de observabilidade: maior que controle_ingestao (8 cols → 26 cols)
+spark.sql("""
+CREATE TABLE IF NOT EXISTS proj_cvm_05_apoio.observabilidade_execucoes (
+  -- Identificação da execução
+  id_execucao STRING COMMENT 'UUID único por execução de task',
+  job_id BIGINT COMMENT 'ID do job no Databricks',
+  job_name STRING COMMENT 'Nome do job',
+  run_id BIGINT COMMENT 'ID da execução (run) do job',
+  task_key STRING COMMENT 'Chave da task dentro do job',
+  notebook_path STRING COMMENT 'Caminho do notebook executado',
+
+  -- Contexto do pipeline
+  etapa STRING COMMENT 'Etapa: verificacao, download, bronze, silver',
+  fonte STRING COMMENT 'Fonte: dre, bpa, bpp, landing',
+  ano INT COMMENT 'Ano processado (NULL se múltiplos anos)',
+
+  -- Execução
+  inicio_ts TIMESTAMP COMMENT 'Início da execução',
+  fim_ts TIMESTAMP COMMENT 'Fim da execução',
+  duracao_segundos DOUBLE COMMENT 'Duração em segundos',
+  status STRING COMMENT 'SUCCESS, ERROR, SKIPPED, PARTIAL',
+
+  -- Métricas de arquivos (landing zone)
+  arquivos_verificados INT COMMENT 'Número de arquivos verificados na CVM',
+  arquivos_baixados INT COMMENT 'Número de arquivos baixados',
+  arquivos_arquivados INT COMMENT 'Número de arquivos arquivados (versionamento)',
+  arquivos_ignorados INT COMMENT 'Número de arquivos já atualizados',
+
+  -- Métricas de dados (bronze/silver)
+  registros_processados BIGINT COMMENT 'Número de registros processados',
+  bytes_baixados BIGINT COMMENT 'Bytes baixados da CVM',
+  bytes_arquivados BIGINT COMMENT 'Bytes arquivados (versionamento)',
+
+  -- Metadados da fonte CVM
+  last_modified_cvm TIMESTAMP COMMENT 'Last-Modified do arquivo na CVM',
+  url_cvm STRING COMMENT 'URL do arquivo CVM',
+
+  -- Erro
+  tipo_erro STRING COMMENT 'Tipo do erro (ex: HTTPError, ValueError)',
+  mensagem_erro STRING COMMENT 'Mensagem de erro (até 2000 chars)',
+
+  -- Ambiente
+  trigger_type STRING COMMENT 'Tipo de trigger (SCHEDULED, ONE_TIME, etc.)',
+  parametros STRING COMMENT 'Parâmetros do job (JSON)',
+
+  -- Auditoria
+  created_at TIMESTAMP COMMENT 'Timestamp de criação do registro'
+)
+USING DELTA
+COMMENT 'Observabilidade - registra todas as execuções do pipeline CVM com métricas detalhadas de arquivos, dados e erros'
+""")
+
+print("✅ Tabela proj_cvm_05_apoio.observabilidade_execucoes criada")
