@@ -10,3 +10,8 @@ builtins = ["dbutils"]
 
 [lint]
 select = ["E", "F", "W", "I", "DTZ"]
+
+[lint.per-file-ignores]
+# Notebooks Databricks nao terminam com quebra de linha: a plataforma
+# remove ao serializar. Corrigir na mao so duraria ate o proximo save.
+"05_apoio/config_parametros.py" = ["W292"]
