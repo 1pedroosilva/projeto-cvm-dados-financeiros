@@ -15,6 +15,28 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 
 
+## 20/09/2026 - Enriquecimento Hierarquico de Contas na Silver
+
+### Contexto
+Os dados CVM trazem contas contabeis em estrutura hierarquica por notacao de pontos (`CD_CONTA`), ate 5 niveis. Somar todos os registros de uma empresa soma pais + filhos, inflando o total (double-counting). A Silver nao tinha colunas para filtrar por nivel, e `ST_CONTA_FIXA` (que distingue contas fixas da estrutura CVM de detalhamentos por empresa) existia na Bronze mas foi descartada na projecao Silver.
+
+### Decisoes
+* **Enriquecimento hierarquico e Silver, nao Gold** → Derivar `NIVEL_CONTA`, `CD_CONTA_PAI`, `CD_CONTA_RAIZ` de `CD_CONTA` e transformacao tecnica agnostica de negocio (qualquer engenheiro sem contexto de dominio faria). Modelagem dimensional para consumo e Gold
+* **Projetar `ST_CONTA_FIXA` da Bronze** → A coluna existia na fonte mas foi descartada na projecao Silver original. Agora preservada para distinguir contas fixas (S) de detalhamentos por empresa (N)
+* **Descricao mais frequente para `dim_conta` futura** → A CVM nao publica lista oficial de contas com descricao canonica. Validacao empirica: 100% das contas fixas presentes em 2021 e 2025 tem a mesma descricao mais frequente. Abordagem aceita como estavel na pratica
+
+### Implementado
+* `ALTER TABLE` nas 3 tabelas Silver (201, 202, 203) adicionando `ST_CONTA_FIXA STRING`, `NIVEL_CONTA INT`, `CD_CONTA_PAI STRING`, `CD_CONTA_RAIZ STRING`
+* Notebooks 201, 202, 203: imports (`split`, `size`, `regexp_extract`, `lit`), derivacao das 4 colunas na etapa de transformacao, adicao na projeção explicita
+* DDL 001: `CREATE TABLE` atualizado para as 3 tabelas Silver (ambientes novos ja nascem com as colunas)
+* Reprocessamento completo: DRE (162.885 registros), BPA (308.988), BPP (528.436) — 2021 a 2026
+* Validacao: 962 contas unicas (236 DRE + 323 BPA + 403 BPP), zero sobreposicao entre demonstracoes, rollup confirmado (Petrobras BPA 2025: Ativo Total = 1.223 bi = 140 bi Circulante + 1.083 bi Nao Circulante)
+
+### Key Insight
+`ST_CONTA_FIXA` estava na Bronze mas foi descartada na projecao Silver — a projecao explicita que protege contra mudancas de schema na Bronze tambem descarta colunas uteis. Cada coluna descartada precisa ser justificada; colunas da fonte que carregam metadados estruturais (como `ST_CONTA_FIXA`) devem ser preservadas na Silver, mesmo que nao sejam usadas imediatamente, porque o custo de preservar e zero e o custo de redescobrir a omissao e um reprocessamento completo.
+
+---
+
 ## 20/09/2026 - Invariante do Bronze e Cegueira a Republicacoes
 
 ### Contexto

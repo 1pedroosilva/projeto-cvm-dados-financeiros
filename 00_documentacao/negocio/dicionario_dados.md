@@ -162,6 +162,19 @@ O campo `CD_CONTA` segue uma estrutura hierárquica:
 * **Contas Fixas** (`ST_CONTA_FIXA = S`): Estrutura obrigatória da DRE, presente em todas as empresas
 * **Contas Variáveis** (`ST_CONTA_FIXA = N`): Detalhamentos específicos de cada empresa
 
+### Colunas Derivadas na Silver
+
+A camada Silver enriquece os dados com 4 colunas derivadas da estrutura hierárquica de `CD_CONTA`:
+
+| Coluna | Tipo | Origem | Descrição |
+| --- | --- | --- | --- |
+| `ST_CONTA_FIXA` | STRING | Bronze (projetada) | S = conta fixa da estrutura CVM, N = detalhamento específico por empresa |
+| `NIVEL_CONTA` | INT | Derivado de `CD_CONTA` | Nível hierárquico (1 a 5), calculado via `size(split(CD_CONTA, "[.]"))` |
+| `CD_CONTA_PAI` | STRING | Derivado de `CD_CONTA` | Conta pai na hierarquia — tudo antes do último `.` (NULL para nível 1) |
+| `CD_CONTA_RAIZ` | STRING | Derivado de `CD_CONTA` | Conta raiz — primeiro segmento antes do primeiro `.` (ex: `3.01.01` → `3`) |
+
+**Double-counting**: Somar todos os registros de uma empresa soma pais + filhos, inflando o total. Dashboards e análises devem filtrar por `NIVEL_CONTA` para agregar apenas contas do mesmo nível.
+
 ## Regras de Negócio
 
 ### Dados Consolidados

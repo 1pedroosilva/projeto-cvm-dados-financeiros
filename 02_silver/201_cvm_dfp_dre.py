@@ -28,6 +28,16 @@
 # MAGIC
 # MAGIC A Silver normaliza `VL_CONTA` para **reais (unidade)** em todos os registros, preservando `ESCALA_MOEDA` para rastreabilidade. Isso garante que qualquer análise downstream compare valores em uma única escala.
 # MAGIC
+# MAGIC ## Enriquecimento Hierárquico de Contas
+# MAGIC A CVM publica contas contábeis em estrutura hierárquica por notação de pontos (`CD_CONTA`): `3` → `3.01` → `3.01.01` → `3.01.01.01` (até 5 níveis). A Silver deriva 4 colunas dessa estrutura:
+# MAGIC
+# MAGIC * **`ST_CONTA_FIXA`**: Projetada da Bronze (S = conta fixa da estrutura CVM, N = detalhamento específico por empresa). Antes descartada na projeção Silver, agora preservada
+# MAGIC * **`NIVEL_CONTA`**: Nível hierárquico, derivado via `size(split(CD_CONTA, "[.]"))` (1 a 5)
+# MAGIC * **`CD_CONTA_PAI`**: Conta pai na hierarquia — tudo antes do último `.` (NULL para nível 1)
+# MAGIC * **`CD_CONTA_RAIZ`**: Conta raiz — primeiro segmento antes do primeiro `.` (ex: `3.01.01` → `3`)
+# MAGIC
+# MAGIC **Rollup**: o valor do pai é a soma dos filhos diretos. Dashboards devem filtrar por `NIVEL_CONTA` para evitar double-counting (somar todos os registros soma pais + filhos, inflando o total).
+# MAGIC
 # MAGIC ## Entrada
 # MAGIC * **Tabela Bronze**: `proj_cvm_01_bronze.101_dre_dfp`
 # MAGIC * Dados brutos conforme extraídos da CVM
@@ -49,7 +59,7 @@
 try:
     MODO_DEV = dbutils.widgets.get('MODO_DEV').lower() == 'true'
 except Exception:
-    MODO_DEV = False
+    MODO_DEV = True
 
 if MODO_DEV:
     ANOS_PROCESSAR = inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
@@ -63,7 +73,7 @@ if not ANOS_PROCESSAR:
 
 # DBTITLE 1,Imports
 from pyspark.sql import Window
-from pyspark.sql.functions import col, to_date, year, quarter, month, row_number, current_timestamp, when
+from pyspark.sql.functions import col, to_date, year, quarter, month, row_number, current_timestamp, when, split, size, regexp_extract, lit
 from pyspark.sql.types import DoubleType, IntegerType
 
 # COMMAND ----------
@@ -134,7 +144,15 @@ for ano in ANOS_PROCESSAR:
         .withColumn("ANO", year(col("DT_REFER"))) \
         .withColumn("TRIMESTRE", quarter(col("DT_REFER"))) \
         .withColumn("MES", month(col("DT_REFER"))) \
-        .withColumn("DT_PROCESSAMENTO", current_timestamp())
+        .withColumn("DT_PROCESSAMENTO", current_timestamp()) \
+        .withColumn("ST_CONTA_FIXA", col("ST_CONTA_FIXA")) \
+        .withColumn("NIVEL_CONTA", size(split(col("CD_CONTA"), "[.]"))) \
+        .withColumn("CD_CONTA_PAI",
+            when(size(split(col("CD_CONTA"), "[.]")) > 1,
+                regexp_extract(col("CD_CONTA"), r"^(.+)\.[^.]+$", 1)
+            ).otherwise(lit(None).cast("string"))
+        ) \
+        .withColumn("CD_CONTA_RAIZ", split(col("CD_CONTA"), "[.]")[0])
 
     # PROJEÇÃO EXPLÍCITA: Garante que DataFrame corresponde ao schema Silver
     # Qualquer coluna extra no DataFrame é automaticamente descartada
@@ -157,7 +175,11 @@ for ano in ANOS_PROCESSAR:
         "ANO",
         "TRIMESTRE",
         "MES",
-        "DT_PROCESSAMENTO"
+        "DT_PROCESSAMENTO",
+        "ST_CONTA_FIXA",
+        "NIVEL_CONTA",
+        "CD_CONTA_PAI",
+        "CD_CONTA_RAIZ"
     )
 
     # ETAPA 3: REPLACE WHERE (substituição atômica por período)

@@ -179,7 +179,8 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
    - Conversão de tipos (`DT_REFER` → date, `VL_CONTA` → double)
    - Normalização de escala monetária (`VL_CONTA` × 1000 quando `ESCALA_MOEDA = "MIL"`)
    - Filtro de nulos (campos críticos)
-   - Enriquecimento (colunas `ANO`, `TRIMESTRE`, `MES`, `DT_PROCESSAMENTO`)
+   - Enriquecimento temporal (colunas `ANO`, `TRIMESTRE`, `MES`, `DT_PROCESSAMENTO`)
+   - Enriquecimento hierárquico (colunas `ST_CONTA_FIXA`, `NIVEL_CONTA`, `CD_CONTA_PAI`, `CD_CONTA_RAIZ` derivadas de `CD_CONTA`)
 3. **Gravação**: `REPLACE WHERE ano`
    - Substituição atômica por período: Delta Lake garante operação all-or-nothing
    - Elimina janela de vulnerabilidade entre DELETE e APPEND
@@ -336,7 +337,7 @@ inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
 **Características Técnicas:**
 * **Filtro de versão**: Window Function (ROW_NUMBER) para selecionar versão mais recente
 * **Projeção explícita**: `.select()` de todas as colunas do DDL (descarta extras de Bronze)
-* **Transformações**: Conversão de tipos, normalização de escala monetária (MIL → reais), colunas derivadas (ANO, TRIMESTRE, MES)
+* **Transformações**: Conversão de tipos, normalização de escala monetária (MIL → reais), colunas derivadas (ANO, TRIMESTRE, MES), enriquecimento hierárquico (ST_CONTA_FIXA, NIVEL_CONTA, CD_CONTA_PAI, CD_CONTA_RAIZ)
 * **Estratégia**: REPLACE WHERE (substituição atômica por período - elimina janela de vulnerabilidade do DELETE+APPEND)
 * **Particionamento**: Por ano (`ANO`)
 

@@ -202,7 +202,7 @@ print("✅ Tabela proj_cvm_01_bronze.103_bpp_dfp criada")
 
 # COMMAND ----------
 
-# DBTITLE 1,CRIAÇÃO DA TABELA SILVER - 203_bpp_dfp
+# DBTITLE 1,CRIACAO DA TABELA SILVER - 203_bpp_dfp
 # Tabela Silver: BPP transformada (dados limpos e enriquecidos, particionada por ANO)
 spark.sql("""
 CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.203_bpp_dfp (
@@ -222,7 +222,11 @@ CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.203_bpp_dfp (
   ANO INT,
   TRIMESTRE INT,
   MES INT,
-  DT_PROCESSAMENTO TIMESTAMP
+  DT_PROCESSAMENTO TIMESTAMP,
+  ST_CONTA_FIXA STRING,
+  NIVEL_CONTA INT,
+  CD_CONTA_PAI STRING,
+  CD_CONTA_RAIZ STRING
 )
 USING DELTA
 PARTITIONED BY (ANO)
@@ -233,7 +237,7 @@ print("✅ Tabela proj_cvm_02_silver.203_bpp_dfp criada")
 
 # COMMAND ----------
 
-# DBTITLE 1,CRIAÇÃO DA TABELA SILVER - 201_dre_dfp
+# DBTITLE 1,CRIACAO DA TABELA SILVER - 201_dre_dfp
 # Tabela Silver: DRE transformada (dados limpos e enriquecidos, particionada por ANO)
 spark.sql("""
 CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.201_dre_dfp (
@@ -254,7 +258,11 @@ CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.201_dre_dfp (
   ANO INT,
   TRIMESTRE INT,
   MES INT,
-  DT_PROCESSAMENTO TIMESTAMP
+  DT_PROCESSAMENTO TIMESTAMP,
+  ST_CONTA_FIXA STRING,
+  NIVEL_CONTA INT,
+  CD_CONTA_PAI STRING,
+  CD_CONTA_RAIZ STRING
 )
 USING DELTA
 PARTITIONED BY (ANO)
@@ -265,7 +273,7 @@ print("✅ Tabela proj_cvm_02_silver.201_dre_dfp criada")
 
 # COMMAND ----------
 
-# DBTITLE 1,CRIAÇÃO DA TABELA SILVER - 202_bpa_dfp
+# DBTITLE 1,CRIACAO DA TABELA SILVER - 202_bpa_dfp
 # Tabela Silver: BPA transformada (dados limpos e enriquecidos, particionada por ANO)
 spark.sql("""
 CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.202_bpa_dfp (
@@ -286,7 +294,11 @@ CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.202_bpa_dfp (
   ANO INT,
   TRIMESTRE INT,
   MES INT,
-  DT_PROCESSAMENTO TIMESTAMP
+  DT_PROCESSAMENTO TIMESTAMP,
+  ST_CONTA_FIXA STRING,
+  NIVEL_CONTA INT,
+  CD_CONTA_PAI STRING,
+  CD_CONTA_RAIZ STRING
 )
 USING DELTA
 PARTITIONED BY (ANO)
