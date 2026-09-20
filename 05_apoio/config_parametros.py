@@ -17,6 +17,7 @@
 # ============================================================================
 
 import os
+import json
 import urllib.request
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -71,6 +72,18 @@ VOLUME_LANDING_DFP = f"{VOLUME_LANDING}/dfp"
 SCHEMA_APOIO = "proj_cvm_05_apoio"
 TABELA_CONTROLE = f"{SCHEMA_APOIO}.controle_ingestao"
 
+# Mapeamento fonte → tabela destino (para verificação de dados reais)
+# Permite que a detecção verifique se dados existem fisicamente na tabela,
+# não apenas confie no flag SUCCESS do controle
+FONTE_TABELA_DESTINO = {
+    'dre': f"{CATALOG_NAME}.{SCHEMA_BRONZE}.101_dre_dfp",
+    'bpa': f"{CATALOG_NAME}.{SCHEMA_BRONZE}.102_bpa_dfp",
+    'bpp': f"{CATALOG_NAME}.{SCHEMA_BRONZE}.103_bpp_dfp",
+    'dre_silver': f"{CATALOG_NAME}.{SCHEMA_SILVER}.201_dre_dfp",
+    'bpa_silver': f"{CATALOG_NAME}.{SCHEMA_SILVER}.202_bpa_dfp",
+    'bpp_silver': f"{CATALOG_NAME}.{SCHEMA_SILVER}.203_bpp_dfp",
+}
+
 # ============================================================================
 # FUNÇÕES AUXILIARES
 # ============================================================================
@@ -86,115 +99,128 @@ def get_anos_disponiveis_cvm() -> list:
     return list(range(ANO_INICIAL_CVM, ano_atual + 1))
 
 
-def verificar_arquivo_existe_cvm(url: str) -> tuple:
-    """Verifica se arquivo existe na CVM e retorna metadados HTTP.
-
-    Returns:
-        Tupla (existe: bool, last_modified: datetime, tamanho_bytes: int)
-    """
-    try:
-        req = urllib.request.Request(url, method='HEAD')
-        with urllib.request.urlopen(req, timeout=10) as response:
-            last_modified_str = response.headers.get('Last-Modified')
-            last_modified_dt = (
-                datetime.strptime(
-                    last_modified_str, '%a, %d %b %Y %H:%M:%S %Z'
-                ).replace(tzinfo=timezone.utc)
-                if last_modified_str
-                else None
-            )
-
-            content_length = response.headers.get('Content-Length')
-            tamanho_bytes = int(content_length) if content_length else None
-
-            return (True, last_modified_dt, tamanho_bytes)
-    except Exception:
-        return (False, None, None)
-
-
 def get_novos_anos_para_processar(fonte: str, tabela_controle: str = TABELA_CONTROLE) -> list:
-    """Identifica anos novos que ainda não foram processados.
+    """Identifica anos que precisam processamento.
+
+    TRÊS ESTADOS DE DETECÇÃO (todos leitura local, sem HTTP):
+    1. Nunca processado: ano sem registro SUCCESS no controle
+    2. Fantasma: SUCCESS no controle mas sem dados na tabela destino
+    3. Republicado: SUCCESS e dados existem, mas _metadata.json da landing
+       tem last_modified_cvm diferente do registrado no controle
+
+    O _metadata.json é atualizado pelo 003/004 quando a CVM republica o
+    arquivo. Esta função compara esse valor contra o last_modified_cvm
+    armazenado no controle_ingestao — leitura local, sem rede.
 
     Compatível com Spark Connect / Serverless Compute (não usa RDDs).
     """
     from pyspark.sql import SparkSession
+    from pyspark.sql.utils import AnalysisException
     spark = SparkSession.builder.getOrCreate()
 
     anos_disponiveis = get_anos_disponiveis_cvm()
 
     try:
         df_controle = spark.table(tabela_controle)
-        # Usar toPandas() ao invés de rdd (compatível com Spark Connect)
         anos_processados_rows = (
             df_controle
             .filter(f"fonte = '{fonte}' AND status = 'SUCCESS'")
-            .select("ano")
+            .select("ano", "last_modified_cvm")
             .distinct()
             .toPandas()
         )
 
         anos_processados = (
-            anos_processados_rows['ano'].tolist()
+            sorted(anos_processados_rows['ano'].unique().tolist())
             if not anos_processados_rows.empty
             else []
         )
-        novos_anos = [ano for ano in anos_disponiveis if ano not in anos_processados]
+
+        # ESTADO 2: Fantasma — SUCCESS sem dados reais na tabela destino
+        tabela_destino = FONTE_TABELA_DESTINO.get(fonte)
+        anos_fantasma = []
+        if tabela_destino:
+            try:
+                anos_com_dados_rows = (
+                    spark.table(tabela_destino)
+                    .selectExpr("year(DT_REFER) as ano")
+                    .distinct()
+                    .toPandas()
+                )
+                anos_com_dados = (
+                    anos_com_dados_rows['ano'].tolist()
+                    if not anos_com_dados_rows.empty
+                    else []
+                )
+                anos_fantasma = [ano for ano in anos_processados if ano not in anos_com_dados]
+                if anos_fantasma:
+                    print(f"⚠️  [{fonte}] Anos fantasma (SUCCESS sem dados): {anos_fantasma}")
+            except AnalysisException:
+                pass  # Tabela ainda não existe (primeira execução)
+
+        # ESTADO 3: Republicado — _metadata.json da landing tem last_modified_cvm
+        # diferente do registrado no controle_ingestao (leitura local, sem rede)
+        anos_republicados = []
+        if anos_processados and not anos_processados_rows.empty:
+            # Dict: ano -> lista de last_modified_cvm do controle
+            controle_lm_por_ano = {}
+            for _, row in anos_processados_rows.iterrows():
+                ano_val = int(row['ano'])
+                lm_val = row['last_modified_cvm']
+                if ano_val not in controle_lm_por_ano:
+                    controle_lm_por_ano[ano_val] = []
+                if lm_val is not None:
+                    controle_lm_por_ano[ano_val].append(lm_val)
+
+            for ano in anos_processados:
+                if ano in anos_fantasma:
+                    continue  # Já marcado para reprocessamento
+
+                metadata_path = f"{VOLUME_LANDING_DFP}/{ano}/_metadata.json"
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                    metadata_lm_str = metadata.get('last_modified_cvm')
+                    if not metadata_lm_str:
+                        continue
+
+                    # Normalizar para naive UTC datetime
+                    metadata_lm = datetime.fromisoformat(metadata_lm_str)
+                    if metadata_lm.tzinfo:
+                        metadata_lm = metadata_lm.astimezone(timezone.utc).replace(tzinfo=None)
+
+                    # Verificar se algum registro do controle tem este last_modified_cvm
+                    tem_match = False
+                    for controle_lm in controle_lm_por_ano.get(ano, []):
+                        if controle_lm is None:
+                            continue
+                        # controle_lm pode ser pd.Timestamp — converter para datetime
+                        if hasattr(controle_lm, 'to_pydatetime'):
+                            controle_lm = controle_lm.to_pydatetime()
+                        if controle_lm.tzinfo:
+                            controle_lm = controle_lm.astimezone(timezone.utc).replace(tzinfo=None)
+                        if metadata_lm == controle_lm:
+                            tem_match = True
+                            break
+
+                    if not tem_match:
+                        anos_republicados.append(ano)
+                        print(f"🔄 [{fonte}] Ano {ano}: fonte republicada (Last-Modified mudou)")
+                except Exception:
+                    pass  # _metadata.json não existe ou não pode ser lido
+
+            if anos_republicados:
+                print(f"🔄 [{fonte}] Anos republicados pela CVM: {anos_republicados}")
+
+        # Novos anos = nunca processados + fantasma + republicados
+        novos_anos = [ano for ano in anos_disponiveis
+                      if ano not in anos_processados
+                      or ano in anos_fantasma
+                      or ano in anos_republicados]
         return sorted(novos_anos)
 
     except Exception:
         return anos_disponiveis
-
-
-def get_anos_com_atualizacao_cvm(
-    fonte: str, tipo_demo: str, tabela_controle: str = TABELA_CONTROLE
-) -> list:
-    """Detecta anos cujo arquivo foi atualizado na CVM (Last-Modified mais recente).
-
-    Nota: last_modified_cvm na tabela de controle é TIMESTAMP, permitindo comparação
-    direta com datetime retornado por verificar_arquivo_existe_cvm.
-    """
-    from pyspark.sql import SparkSession
-    from pyspark.sql.utils import AnalysisException
-
-    spark = SparkSession.builder.getOrCreate()
-
-    anos_atualizados = []
-
-    try:
-        df_controle = spark.table(tabela_controle)
-        registros = (
-            df_controle
-            .filter(f"fonte = '{fonte}' AND status = 'SUCCESS'")
-            .select("ano", "last_modified_cvm")
-            .collect()
-        )
-
-        for row in registros:
-            ano = row['ano']
-            last_modified_local = row['last_modified_cvm']  # Já vem como datetime do TIMESTAMP
-            
-            # Garantir que last_modified_local seja offset-aware para comparação
-            if last_modified_local and not last_modified_local.tzinfo:
-                last_modified_local = last_modified_local.replace(tzinfo=timezone.utc)
-
-            url = get_url_arquivo_cvm(ano)
-            existe, last_modified_cvm, _ = verificar_arquivo_existe_cvm(url)
-
-            if existe and last_modified_cvm:
-                # Comparação entre datetime objects (ambos offset-aware)
-                if last_modified_local is None or last_modified_cvm > last_modified_local:
-                    anos_atualizados.append(ano)
-
-        return sorted(anos_atualizados)
-
-    except AnalysisException as e:
-        # Tabela de controle não existe ainda (primeira execução)
-        print(f"ℹ️  Tabela de controle não encontrada - primeira execução: {e}")
-        return []
-    except Exception as e:
-        # Erros genéricos (rede, parsing, etc)
-        print(f"⚠️  Erro ao detectar atualizações: {type(e).__name__}: {e}")
-        return []
 
 
 def get_anos_para_processar_inteligente(fonte: str, tipo_demo: str,
@@ -218,10 +244,9 @@ def get_anos_para_processar_inteligente(fonte: str, tipo_demo: str,
     if force_anos is not None:
         return sorted(force_anos)
 
-    # Detectar todos os anos pendentes
+    # Detectar anos pendentes (leitura local, sem HTTP — republicação detectada via _metadata.json)
     novos_anos = get_novos_anos_para_processar(fonte, tabela_controle)
-    anos_atualizados = get_anos_com_atualizacao_cvm(fonte, tipo_demo, tabela_controle)
-    todos_pendentes = set(novos_anos + anos_atualizados)
+    todos_pendentes = set(novos_anos)
 
     # Aplicar janela temporal (política definida em JANELA_ANOS_RELEVANTE)
     ano_atual = datetime.now(FUSO_PROJETO).year
@@ -404,10 +429,15 @@ def inicializar_anos_processar(force_anos: list = None, silent: bool = False) ->
         # Detecção inteligente automática
         try:
             # Consolidar anos de múltiplas fontes DFP
+            # Inclui fontes Bronze E Silver para que a detecção identifique
+            # anos pendentes em qualquer camada, não apenas Bronze
             fontes_config = [
                 ('dre', 'dre'),
                 ('bpa', 'bpa'),
-                ('bpp', 'bpp')
+                ('bpp', 'bpp'),
+                ('dre_silver', 'dre'),
+                ('bpa_silver', 'bpa'),
+                ('bpp_silver', 'bpp')
             ]
 
             anos_consolidados = set()

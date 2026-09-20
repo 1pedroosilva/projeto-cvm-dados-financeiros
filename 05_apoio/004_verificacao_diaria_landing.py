@@ -40,13 +40,18 @@
 # Capturar timestamp de início para cálculo de duração na observabilidade
 _inicio_execucao = datetime.now()
 
-# Capturar explicitamente o retorno de inicializar_anos_processar()
-ANOS_PROCESSAR = inicializar_anos_processar()
+# 004 itera a janela temporal diretamente, sem depender de ANOS_PROCESSAR.
+# Motivo: o 004 existe para DESCOBRIR mudanças na CVM. Se dependesse de
+# inicializar_anos_processar(), receberia a lista de quem já assumiu que
+# nada mudou — cegueira a republicações.
+ano_atual = datetime.now(FUSO_PROJETO).year
+ano_inicio_janela = ano_atual - JANELA_ANOS_RELEVANTE
+ANOS_PROCESSAR = list(range(ano_inicio_janela, ano_atual + 1))
 
 if not ANOS_PROCESSAR:
     raise ValueError("❌ ANOS_PROCESSAR vazio - nenhum ano para processar")
 
-print(f"🎯 Anos a verificar: {ANOS_PROCESSAR}")
+print(f"🎯 Anos a verificar (janela direta {ano_inicio_janela}-{ano_atual}): {ANOS_PROCESSAR}")
 
 # COMMAND ----------
 
