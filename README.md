@@ -1,3 +1,7 @@
+
+[![CI](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/ci.yml/badge.svg)](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/ci.yml)
+[![Testes Databricks](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/testes_integracao.yml/badge.svg)](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/testes_integracao.yml)
+
 # Projeto CVM - Dados Financeiros
 
 Pipeline de ingestão e transformação de demonstrações financeiras de companhias abertas brasileiras, publicadas pela Comissão de Valores Mobiliários (CVM). Arquitetura medalhão (bronze, silver, gold) implementada em Databricks com Delta Lake e Unity Catalog.
