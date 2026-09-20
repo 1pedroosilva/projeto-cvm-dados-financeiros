@@ -425,18 +425,16 @@ except Exception as e:
 
 # DBTITLE 1,Achado: Escalas Monetárias
 # MAGIC %md
-# MAGIC ## Achado: Escalas Monetárias
+# MAGIC ## Achado: Escalas Monetárias — Normalização JÁ Aplicada
 # MAGIC
-# MAGIC Duas escalas coexistem na mesma coluna VL_CONTA. Comparações diretas entre empresas produzem erros de magnitude 1000x.
+# MAGIC A coluna `ESCALA_MOEDA` preserva a escala original (MIL/UNIDADE) para rastreabilidade, mas `VL_CONTA` **já é normalizada** no notebook Silver: registros em MIL são multiplicados por 1000, resultando em valores em reais para todos os registros.
 # MAGIC
-# MAGIC | Escala | Registros | Percentual | Empresas |
+# MAGIC | Escala Original | Registros | Percentual | Empresas |
 # MAGIC | --- | --- | --- | --- |
 # MAGIC | MIL | 303.600 | 98,3% | 526 |
 # MAGIC | UNIDADE | 5.388 | 1,7% | 15 |
 # MAGIC
-# MAGIC ✗ **Problema crítico detectado**: Comparações diretas produzem erros de magnitude 1000x.
-# MAGIC
-# MAGIC **Correção necessária no notebook 202_bpa_silver**: Criar coluna VL_CONTA_NORMALIZADO aplicando fator de conversão baseado em ESCALA_MOEDA (converter tudo para a mesma escala base). Padrão idêntico ao detectado na DRE.
+# MAGIC ✓ **Normalização confirmada**: `VL_CONTA` está em reais para todos os registros. `ESCALA_MOEDA` é metadado de rastreabilidade.
 
 # COMMAND ----------
 
@@ -770,17 +768,16 @@ except Exception as e:
 # MAGIC | Métrica | Valor |
 # MAGIC | --- | --- |
 # MAGIC | Registros | 308.988 |
-# MAGIC | Colunas | 21 |
+# MAGIC | Colunas | 22 (21 originais + TIPO_CONTA) |
 # MAGIC | Empresas | 537 |
 # MAGIC | Cobertura temporal | 2021-2026 (6 anos) |
 # MAGIC | Contas distintas | 323 (315 analíticas + 8 totalizadoras) |
 # MAGIC
-# MAGIC **Problemas Confirmados**:
+# MAGIC **Correções Implementadas (20/09/2026):**
 # MAGIC
-# MAGIC | Problema | Impacto | Prioridade | Status |
-# MAGIC | --- | --- | --- | --- |
-# MAGIC | Escalas monetárias não normalizadas | Erros de magnitude 1000x em comparações | Crítica | Confirmado (98,3% MIL / 1,7% UNIDADE) |
-# MAGIC | Hierarquia sem classificação explícita | Duplicação em somas | Crítica | Confirmado (95,2% analíticas / 4,8% totalizadoras) |
+# MAGIC | Correção | Status |
+# MAGIC | --- | --- |
+# MAGIC | TIPO_CONTA (TOTALIZADORA vs ANALITICA) | ✅ Implementada |
 # MAGIC
 # MAGIC **Validações Concluídas**:
 # MAGIC
@@ -789,12 +786,10 @@ except Exception as e:
 # MAGIC | Completude (colunas obrigatórias) | ✓ Zero nulos |
 # MAGIC | Chave de negócio | ✓ (CNPJ_CIA, DT_REFER, VERSAO, CD_CONTA, GRUPO_DFP, ORDEM_EXERC) única |
 # MAGIC | Cobertura temporal | ✓ Landing Zone = Silver (2021-2026) |
+# MAGIC | Normalização de escala | ✓ VL_CONTA já normalizado (×1000 quando MIL) |
 # MAGIC | Integridade hierárquica | ✓ 100% das totalizadoras aditivas (diferença = 0) |
 # MAGIC | Versões de documentos | ✓ Zero casos de múltiplas versões |
 # MAGIC
-# MAGIC **Correções Necessárias (consistente com DRE)**:
+# MAGIC **Diferenças vs DRE**: BPA não possui DT_INI_EXERC (21 vs 22 colunas); é puramente aditivo (sem contas derivadas); tem ~1,9x mais registros; e maior proporção de zeros (51,5% vs 31,7%), refletindo a natureza patrimonial do balanço. BPA não requer TIPO_ESTRUTURAL (todas as totalizadoras são aditivas).
 # MAGIC
-# MAGIC 1. Criar coluna VL_CONTA_NORMALIZADO no notebook 202_bpa_silver
-# MAGIC 2. Adicionar coluna TIPO_CONTA no notebook 202_bpa_silver
-# MAGIC
-# MAGIC **Diferenças vs DRE**: BPA não possui DT_INI_EXERC (21 vs 22 colunas); é puramente aditivo (sem contas derivadas); tem ~1,9x mais registros; e maior proporção de zeros (51,5% vs 31,7%), refletindo a natureza patrimonial do balanço.
+# MAGIC ✅ **Reexecutado em 20/09/2026**: TIPO_CONTA populada — 294.083 analíticas + 14.905 totalizadoras = 308.988.

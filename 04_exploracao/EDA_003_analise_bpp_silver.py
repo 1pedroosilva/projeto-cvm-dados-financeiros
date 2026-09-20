@@ -425,18 +425,16 @@ except Exception as e:
 
 # DBTITLE 1,Achado: Escalas Monetárias
 # MAGIC %md
-# MAGIC ## Achado: Escalas Monetárias
+# MAGIC ## Achado: Escalas Monetárias — Normalização JÁ Aplicada
 # MAGIC
-# MAGIC Duas escalas coexistem na mesma coluna VL_CONTA. Comparações diretas entre empresas produzem erros de magnitude 1000x.
+# MAGIC A coluna `ESCALA_MOEDA` preserva a escala original (MIL/UNIDADE) para rastreabilidade, mas `VL_CONTA` **já é normalizada** no notebook Silver: registros em MIL são multiplicados por 1000, resultando em valores em reais para todos os registros.
 # MAGIC
-# MAGIC | Escala | Registros | Percentual | Empresas |
+# MAGIC | Escala Original | Registros | Percentual | Empresas |
 # MAGIC | --- | --- | --- | --- |
 # MAGIC | MIL | 518.687 | 98,2% | 526 |
 # MAGIC | UNIDADE | 9.749 | 1,8% | 15 |
 # MAGIC
-# MAGIC ✗ **Problema crítico detectado**: Comparações diretas produzem erros de magnitude 1000x.
-# MAGIC
-# MAGIC **Correção necessária no notebook 203_bpp_silver**: Criar coluna VL_CONTA_NORMALIZADO aplicando fator de conversão baseado em ESCALA_MOEDA. Padrão idêntico ao detectado em DRE e BPA.
+# MAGIC ✓ **Normalização confirmada**: `VL_CONTA` está em reais para todos os registros. `ESCALA_MOEDA` é metadado de rastreabilidade.
 
 # COMMAND ----------
 
@@ -770,17 +768,16 @@ except Exception as e:
 # MAGIC | Métrica | Valor |
 # MAGIC | --- | --- |
 # MAGIC | Registros | 528.436 |
-# MAGIC | Colunas | 21 |
+# MAGIC | Colunas | 22 (21 originais + TIPO_CONTA) |
 # MAGIC | Empresas | 537 |
 # MAGIC | Cobertura temporal | 2021-2026 (6 anos) |
 # MAGIC | Contas distintas | 403 (394 analíticas + 9 totalizadoras) |
 # MAGIC
-# MAGIC **Problemas Confirmados**:
+# MAGIC **Correções Implementadas (20/09/2026):**
 # MAGIC
-# MAGIC | Problema | Impacto | Prioridade | Status |
-# MAGIC | --- | --- | --- | --- |
-# MAGIC | Escalas monetárias não normalizadas | Erros de magnitude 1000x em comparações | Crítica | Confirmado (98,2% MIL / 1,8% UNIDADE) |
-# MAGIC | Hierarquia sem classificação explícita | Duplicação em somas | Crítica | Confirmado (96,3% analíticas / 3,7% totalizadoras) |
+# MAGIC | Correção | Status |
+# MAGIC | --- | --- |
+# MAGIC | TIPO_CONTA (TOTALIZADORA vs ANALITICA) | ✅ Implementada |
 # MAGIC
 # MAGIC **Validações Concluídas**:
 # MAGIC
@@ -789,23 +786,10 @@ except Exception as e:
 # MAGIC | Completude (colunas obrigatórias) | ✓ Zero nulos |
 # MAGIC | Chave de negócio | ✓ (CNPJ_CIA, DT_REFER, VERSAO, CD_CONTA, GRUPO_DFP, ORDEM_EXERC) única |
 # MAGIC | Cobertura temporal | ✓ Landing Zone = Silver (2021-2026) |
+# MAGIC | Normalização de escala | ✓ VL_CONTA já normalizado (×1000 quando MIL) |
 # MAGIC | Integridade hierárquica | ✓ 100% das totalizadoras aditivas (diferença = 0) |
 # MAGIC | Versões de documentos | ✓ Zero casos de múltiplas versões |
 # MAGIC
-# MAGIC **Correções Necessárias (consistente com DRE e BPA)**:
+# MAGIC **Diferenças vs DRE e BPA**: BPP é a maior e mais granular das três tabelas, com o maior número de contas analíticas e a maior proporção de zeros, refletindo a complexidade do Patrimônio Líquido. BPP não requer TIPO_ESTRUTURAL (todas as totalizadoras são aditivas).
 # MAGIC
-# MAGIC 1. Criar coluna VL_CONTA_NORMALIZADO no notebook 203_bpp_silver
-# MAGIC 2. Adicionar coluna TIPO_CONTA no notebook 203_bpp_silver
-# MAGIC
-# MAGIC **Comparação entre as três tabelas Silver**:
-# MAGIC
-# MAGIC | Métrica | DRE (201) | BPA (202) | BPP (203) |
-# MAGIC | --- | --- | --- | --- |
-# MAGIC | Registros | 162.885 | 308.988 | 528.436 |
-# MAGIC | Colunas | 22 | 21 | 21 |
-# MAGIC | Contas distintas | ~213 | 323 | 403 |
-# MAGIC | Totalizadoras | ~8 | 8 | 9 |
-# MAGIC | Zeros (%) | 31,7% | 51,5% | 60,7% |
-# MAGIC | Tipo de estrutura | Aditiva + Derivada | Puramente aditiva | Puramente aditiva |
-# MAGIC
-# MAGIC BPP é a maior e mais granular das três tabelas, com o maior número de contas analíticas e a maior proporção de zeros, refletindo a complexidade do Patrimônio Líquido.
+# MAGIC ✅ **Reexecutado em 20/09/2026**: TIPO_CONTA populada — 509.000 analíticas + 19.436 totalizadoras = 528.436.
