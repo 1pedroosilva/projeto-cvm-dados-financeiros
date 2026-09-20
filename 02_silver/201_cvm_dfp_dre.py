@@ -152,7 +152,16 @@ for ano in ANOS_PROCESSAR:
                 regexp_extract(col("CD_CONTA"), r"^(.+)\.[^.]+$", 1)
             ).otherwise(lit(None).cast("string"))
         ) \
-        .withColumn("CD_CONTA_RAIZ", split(col("CD_CONTA"), "[.]")[0])
+        .withColumn("CD_CONTA_RAIZ", split(col("CD_CONTA"), "[.]")[0]) \
+        .withColumn("TIPO_CONTA",
+            when(size(split(col("CD_CONTA"), "[.]")) <= 2, lit("TOTALIZADORA"))
+            .otherwise(lit("ANALITICA"))
+        ) \
+        .withColumn("TIPO_ESTRUTURAL",
+            when(size(split(col("CD_CONTA"), "[.]")) > 2, lit(None).cast("string"))
+            .when(col("CD_CONTA").isin("3.02", "3.03", "3.05", "3.07", "3.09", "3.10"), lit("DERIVADA"))
+            .otherwise(lit("ADITIVA"))
+        )
 
     # PROJEÇÃO EXPLÍCITA: Garante que DataFrame corresponde ao schema Silver
     # Qualquer coluna extra no DataFrame é automaticamente descartada
@@ -179,7 +188,9 @@ for ano in ANOS_PROCESSAR:
         "ST_CONTA_FIXA",
         "NIVEL_CONTA",
         "CD_CONTA_PAI",
-        "CD_CONTA_RAIZ"
+        "CD_CONTA_RAIZ",
+        "TIPO_CONTA",
+        "TIPO_ESTRUTURAL"
     )
 
     # ETAPA 3: REPLACE WHERE (substituição atômica por período)

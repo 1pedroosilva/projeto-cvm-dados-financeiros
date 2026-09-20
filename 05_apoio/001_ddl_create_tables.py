@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # DBTITLE 1,DOCUMENTAÇÃO
 # MAGIC %md
 # MAGIC # Criação de Schemas e Tabelas Unity Catalog
@@ -95,6 +99,35 @@ def apply_schema_migration_if_needed():
                 print(f"✓  {table}.{column} - Já está como {new_type}")
             
             # Outro erro (reportar mas não falhar)
+            else:
+                print(f"⚠️  {table}.{column} - {error_msg[:100]}")
+    
+    # Migration 002: Adição de colunas TIPO_CONTA e TIPO_ESTRUTURAL (20/09/2026)
+    # Identificado pelas EDAs 001/002/003 como correção necessária para evitar
+    # dupla contagem em somas (totalizadoras + analíticas) e distinguir
+    # contas aditivas (soma de filhas) de derivadas (fórmula entre irmãs)
+    add_column_migrations = [
+        ("proj_cvm_02_silver.201_dre_dfp", "TIPO_CONTA", "STRING",
+         "Classificação TOTALIZADORA vs ANALITICA (EDA 001)"),
+        ("proj_cvm_02_silver.201_dre_dfp", "TIPO_ESTRUTURAL", "STRING",
+         "Classificação ADITIVA vs DERIVADA para totalizadoras da DRE (EDA 001)"),
+        ("proj_cvm_02_silver.202_bpa_dfp", "TIPO_CONTA", "STRING",
+         "Classificação TOTALIZADORA vs ANALITICA (EDA 002)"),
+        ("proj_cvm_02_silver.203_bpp_dfp", "TIPO_CONTA", "STRING",
+         "Classificação TOTALIZADORA vs ANALITICA (EDA 003)"),
+    ]
+    
+    for table, column, col_type, reason in add_column_migrations:
+        try:
+            spark.sql(f"ALTER TABLE {table} ADD COLUMNS ({column} {col_type})")
+            print(f"✅ {table}.{column} adicionada ({col_type})")
+            print(f"   Motivo: {reason}")
+        except Exception as e:
+            error_msg = str(e)
+            if "TABLE_OR_VIEW_NOT_FOUND" in error_msg or "does not exist" in error_msg:
+                print(f"⏭️  {table}.{column} - Tabela não existe (será criada)")
+            elif "already exists" in error_msg or "DUPLICATE_COLUMN" in error_msg:
+                print(f"✓  {table}.{column} - Coluna já existe")
             else:
                 print(f"⚠️  {table}.{column} - {error_msg[:100]}")
     
@@ -226,7 +259,8 @@ CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.203_bpp_dfp (
   ST_CONTA_FIXA STRING,
   NIVEL_CONTA INT,
   CD_CONTA_PAI STRING,
-  CD_CONTA_RAIZ STRING
+  CD_CONTA_RAIZ STRING,
+  TIPO_CONTA STRING
 )
 USING DELTA
 PARTITIONED BY (ANO)
@@ -262,7 +296,9 @@ CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.201_dre_dfp (
   ST_CONTA_FIXA STRING,
   NIVEL_CONTA INT,
   CD_CONTA_PAI STRING,
-  CD_CONTA_RAIZ STRING
+  CD_CONTA_RAIZ STRING,
+  TIPO_CONTA STRING,
+  TIPO_ESTRUTURAL STRING
 )
 USING DELTA
 PARTITIONED BY (ANO)
@@ -298,7 +334,8 @@ CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.202_bpa_dfp (
   ST_CONTA_FIXA STRING,
   NIVEL_CONTA INT,
   CD_CONTA_PAI STRING,
-  CD_CONTA_RAIZ STRING
+  CD_CONTA_RAIZ STRING,
+  TIPO_CONTA STRING
 )
 USING DELTA
 PARTITIONED BY (ANO)
