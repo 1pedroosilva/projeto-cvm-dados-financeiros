@@ -8,6 +8,16 @@
 
 # COMMAND ----------
 
+# Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
+# MAGIC %md
+# MAGIC
+
+# COMMAND ----------
+
 # ============================================================================
 # Configuração Centralizada - Pipeline CVM
 # ============================================================================
@@ -16,9 +26,8 @@
 # Vantagem: Mudança de configuração em um único lugar
 # ============================================================================
 
-import os
 import json
-import urllib.request
+import os
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
