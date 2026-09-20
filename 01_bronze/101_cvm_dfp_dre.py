@@ -17,9 +17,12 @@
 # MAGIC * **Demonstração específica**: Demonstração do Resultado do Exercício (DRE) - receitas, despesas e resultado consolidado
 # MAGIC
 # MAGIC ## Conteúdo
-# MAGIC * Extração de dados do portal de dados abertos da CVM
-# MAGIC * Processamento de arquivo ZIP em memória
-# MAGIC * Carga dos dados na camada bronze do Unity Catalog
+# MAGIC * Detecção automática de anos pendentes via `inicializar_anos_processar()` (sem HTTP para CVM)
+# MAGIC * Extração de arquivo ZIP da Landing Zone em memória
+# MAGIC * Guardrails: arquivo vazio → PARA, schema inválido → PARA
+# MAGIC * Carga na camada bronze via APPEND-ONLY (preserva histórico de versões)
+# MAGIC * Idempotência: controle + verificação de dados reais na tabela destino + comparação de Last-Modified (`_metadata.json` vs `controle_ingestao`) para detectar republicações
+# MAGIC * Processamento resiliente: try/except por ano (falha isolada não interrompe demais)
 # MAGIC
 # MAGIC ## Função
 # MAGIC Camada **Bronze** - Ingestão bruta mantendo a estrutura original fornecida pela fonte oficial (CVM).
@@ -31,9 +34,19 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,INICIALIZAR ANOS A PROCESSAR
-# Inicializar ANOS_PROCESSAR - capturar retorno explicitamente
-ANOS_PROCESSAR = inicializar_anos_processar()
+# DBTITLE 1,Inicializar Anos a Processar
+# Captura explícita do retorno com guardrail de lista vazia
+# Para reprocessar todos os anos em desenvolvimento: widget MODO_DEV=true
+try:
+    MODO_DEV = dbutils.widgets.get('MODO_DEV').lower() == 'true'
+except Exception:
+    MODO_DEV = False
+
+if MODO_DEV:
+    ANOS_PROCESSAR = inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
+else:
+    ANOS_PROCESSAR = inicializar_anos_processar()
+
 if not ANOS_PROCESSAR:
     raise ValueError("❌ ANOS_PROCESSAR vazio - nenhum ano para processar")
 
@@ -136,57 +149,49 @@ for ano in ANOS_PROCESSAR:
         anos_falha.append((ano, str(e)))
         continue
 
-# COMMAND ----------
-
-# DBTITLE 1,TRANSFORMAÇÃO PARA SPARK COM VERSIONAMENTO
+    # TRANSFORMAÇÃO PARA SPARK COM VERSIONAMENTO
     # df_raw: Conversão do DataFrame pandas para Spark
     # Mantém a estrutura original completa extraída da CVM
-    
+
     df_raw = spark.createDataFrame(df_pandas)
-    
+
     # RECONCILIAÇÃO: Validar conversão pandas → Spark
     count_spark = df_raw.count()
     print(f"DataFrame Spark criado: {count_spark:,} registros")
     assert count_extraido == count_spark, f"❌ Perda na conversão: {count_extraido} → {count_spark}"
 
-# COMMAND ----------
-
-# DBTITLE 1,GUARDRAIL DE VALIDAÇÃO DE SCHEMA
+    # GUARDRAIL DE VALIDAÇÃO DE SCHEMA
     # df_validado: Validação de colunas essenciais e descarte de extras
     # Protege contra mudanças no formato dos arquivos publicados pela CVM
-    
+
     df_validado = validar_e_projetar_schema(
         df_raw,
         COLUNAS_ESSENCIAIS_DRE,
         f"DRE {ano}"
     )
-    
+
     # RECONCILIAÇÃO: Validar que schema não rejeitou registros
     count_validado = df_validado.count()
     print(f"Registros pós-validação: {count_validado:,}")
     if count_validado < count_spark:
         print(f"⚠️  {count_spark - count_validado} registros rejeitados na validação")
 
-# COMMAND ----------
-
-# DBTITLE 1,ADICIONAR METADADOS TÉCNICOS
+    # ADICIONAR METADADOS TÉCNICOS
     # df_bronze: Enriquecimento com metadados de rastreabilidade
     # Identificadores técnicos para auditoria e debug
-    
+
     df_bronze = df_validado \
         .withColumn("_versao_ingestao", lit(versao_atual)) \
         .withColumn("_last_modified_cvm", lit(last_modified_cvm)) \
         .withColumn("_ingest_ts", current_timestamp()) \
         .withColumn("_source_file", lit(f"dfp_cia_aberta_DRE_con_{ano}.csv"))
-    
+
     # RECONCILIAÇÃO: Confirmar volume antes de gravar
     count_gravar = df_bronze.count()
     print(f"✓ Confirmado: {count_gravar:,} registros a gravar")
     assert count_gravar == count_validado, f"❌ Perda após metadados: {count_validado} → {count_gravar}"
 
-# COMMAND ----------
-
-# DBTITLE 1,CARGA APPEND-ONLY NA BRONZE
+    # CARGA APPEND-ONLY NA BRONZE
     # Gravação: APPEND puro (preserva histórico completo)
     # Bronze nunca deleta dados - Silver filtra versão mais recente
 

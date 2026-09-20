@@ -17,9 +17,12 @@
 # MAGIC * **Demonstração específica**: Balanço Patrimonial Passivo (BPP) - passivos consolidados
 # MAGIC
 # MAGIC ## Conteúdo
-# MAGIC * Extração de dados do portal de dados abertos da CVM
-# MAGIC * Processamento de arquivo ZIP em memória
-# MAGIC * Carga dos dados na camada bronze do Unity Catalog
+# MAGIC * Detecção automática de anos pendentes via `inicializar_anos_processar()` (sem HTTP para CVM)
+# MAGIC * Extração de arquivo ZIP da Landing Zone em memória
+# MAGIC * Guardrails: arquivo vazio → PARA, schema inválido → PARA
+# MAGIC * Carga na camada bronze via APPEND-ONLY (preserva histórico de versões)
+# MAGIC * Idempotência: controle + verificação de dados reais na tabela destino + comparação de Last-Modified (`_metadata.json` vs `controle_ingestao`) para detectar republicações
+# MAGIC * Processamento resiliente: try/except por ano (falha isolada não interrompe demais)
 # MAGIC
 # MAGIC ## Função
 # MAGIC Camada **Bronze** - Ingestão bruta mantendo a estrutura original fornecida pela fonte oficial (CVM).
@@ -31,11 +34,19 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,INICIALIZAR ANOS A PROCESSAR
-# ANOS_PROCESSAR: Lista de anos detectada automaticamente pelo orquestrador
-# Detecta quais anos têm arquivos novos ou atualizados na Landing Zone
+# DBTITLE 1,Inicializar Anos a Processar
+# Captura explícita do retorno com guardrail de lista vazia
+# Para reprocessar todos os anos em desenvolvimento: widget MODO_DEV=true
+try:
+    MODO_DEV = dbutils.widgets.get('MODO_DEV').lower() == 'true'
+except Exception:
+    MODO_DEV = False
 
-ANOS_PROCESSAR = inicializar_anos_processar()
+if MODO_DEV:
+    ANOS_PROCESSAR = inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
+else:
+    ANOS_PROCESSAR = inicializar_anos_processar()
+
 if not ANOS_PROCESSAR:
     raise ValueError("❌ ANOS_PROCESSAR vazio - nenhum ano para processar")
 
