@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # DBTITLE 1,Documentação
 # MAGIC %md
 # MAGIC # Transformação Silver - BPP DFP CVM
@@ -12,6 +16,10 @@
 # MAGIC * **Limpeza**: remoção de nulls críticos, duplicados e inconsistências
 # MAGIC * **Padronização**: conversão de tipos de dados (datas, numéricos, strings)
 # MAGIC * **Enriquecimento**: cálculo de colunas derivadas úteis para análises
+# MAGIC * **Guardrail**: Bronze vazia para o ano → SKIP (não marca SUCCESS, evita estado irrecuperável)
+# MAGIC * **Detecção**: anos pendentes via `inicializar_anos_processar()` (sem HTTP para CVM)
+# MAGIC * **Idempotência**: controle + verificação de dados reais na tabela destino + detecção de republicações via `_metadata.json`
+# MAGIC * **Processamento resiliente**: try/except por ano (falha isolada não interrompe demais)
 # MAGIC
 # MAGIC ## Transformações Aplicadas
 # MAGIC 1. **Filtro de versionamento**: Window Function (PARTITION BY chave natural, ORDER BY _versao_ingestao DESC)
@@ -22,41 +30,53 @@
 # MAGIC
 # MAGIC ## Estratégia de Gravação
 # MAGIC **REPLACE WHERE**: Substituição atômica por período - Delta Lake garante operação all-or-nothing, eliminando janela de vulnerabilidade
+# MAGIC
+# MAGIC ## Normalização de Escala Monetária
+# MAGIC A CVM publica valores em duas escalas:
+# MAGIC * `MIL` — valor em milhares de reais (necessita multiplicação por 1000)
+# MAGIC * `UNIDADE` — valor já em reais
+# MAGIC
+# MAGIC A Silver normaliza `VL_CONTA` para **reais (unidade)** em todos os registros, preservando `ESCALA_MOEDA` para rastreabilidade.
 
 # COMMAND ----------
 
-# DBTITLE 1,INICIALIZAÇÃO E IMPORTS
-# Carregar configurações e funções compartilhadas
-# Disponibiliza: inicializar_anos_processar, schemas UC, parâmetros do projeto
+# DBTITLE 1,Carregar configurações
+# MAGIC %run ../05_apoio/config_parametros
 
-%run ../05_apoio/config_parametros
+# COMMAND ----------
 
+# DBTITLE 1,Inicializar Anos a Processar
+# Captura explícita do retorno com guardrail de lista vazia
+# Para reprocessar todos os anos em desenvolvimento: widget MODO_DEV=true
+try:
+    MODO_DEV = dbutils.widgets.get('MODO_DEV').lower() == 'true'
+except Exception:
+    MODO_DEV = False
+
+if MODO_DEV:
+    ANOS_PROCESSAR = inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
+else:
+    ANOS_PROCESSAR = inicializar_anos_processar()
+
+if not ANOS_PROCESSAR:
+    raise ValueError("❌ ANOS_PROCESSAR vazio - nenhum ano para processar")
+
+# COMMAND ----------
+
+# DBTITLE 1,Imports
 from pyspark.sql import Window
-from pyspark.sql.functions import col, to_date, year, quarter, month, row_number, current_timestamp
+from pyspark.sql.functions import col, to_date, year, quarter, month, row_number, current_timestamp, when
 from pyspark.sql.types import DoubleType, IntegerType
 import logging
 import time
 from datetime import datetime
 
-# Configurar logging estruturado
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)s | %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
-
-# COMMAND ----------
-
-# DBTITLE 1,Inicializar Anos a Processar
-# ANOS_PROCESSAR: Lista de anos detectada pelo orquestrador
-# Processa apenas anos que tiveram nova ingestão em Bronze
-
-if ANOS_PROCESSAR is None:
-    ANOS_PROCESSAR = inicializar_anos_processar()
-
-if not ANOS_PROCESSAR:
-    raise ValueError("❌ ANOS_PROCESSAR vazio - nenhum ano para processar")
 
 # COMMAND ----------
 
@@ -96,6 +116,13 @@ for ano in ANOS_PROCESSAR:
         df_bronze = spark.table("proj_cvm_01_bronze.103_bpp_dfp") \
             .filter(year(col("DT_REFER")) == ano)
         
+        # GUARDRAIL: Verificar se Bronze tem dados reais para este ano
+        # Se Bronze está vazia, NÃO marca SUCCESS — evita estado irrecuperável
+        count_bronze = df_bronze.count()
+        if count_bronze == 0:
+            logger.warning(f"[SKIP] Bronze vazia para ano {ano} - pulando sem marcar SUCCESS")
+            continue
+        
         window_spec = Window.partitionBy(
             "CNPJ_CIA", "DT_REFER", "CD_CONTA", "ORDEM_EXERC"
         ).orderBy(col("_versao_ingestao").desc())
@@ -118,6 +145,10 @@ for ano in ANOS_PROCESSAR:
             col("DT_REFER").isNotNull() &
             col("CD_CONTA").isNotNull() &
             col("VL_CONTA").isNotNull()
+        ) \
+        .withColumn("VL_CONTA",
+            when(col("ESCALA_MOEDA") == "MIL", col("VL_CONTA") * 1000)
+            .otherwise(col("VL_CONTA"))
         ) \
         .withColumn("ANO", year(col("DT_REFER"))) \
         .withColumn("TRIMESTRE", quarter(col("DT_REFER"))) \

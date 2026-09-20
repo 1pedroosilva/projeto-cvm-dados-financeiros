@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # DBTITLE 1,Documentação
 # MAGIC %md
 # MAGIC # Transformação Silver - BPA DFP CVM
@@ -12,6 +16,10 @@
 # MAGIC * **Limpeza**: remoção de nulls críticos, duplicados e inconsistências
 # MAGIC * **Padronização**: conversão de tipos de dados (datas, numéricos, strings)
 # MAGIC * **Enriquecimento**: cálculo de colunas derivadas úteis para análises
+# MAGIC * **Guardrail**: Bronze vazia para o ano → SKIP (não marca SUCCESS, evita estado irrecuperável)
+# MAGIC * **Detecção**: anos pendentes via `inicializar_anos_processar()` (sem HTTP para CVM)
+# MAGIC * **Idempotência**: controle + verificação de dados reais na tabela destino + detecção de republicações via `_metadata.json`
+# MAGIC * **Processamento resiliente**: try/except por ano (falha isolada não interrompe demais)
 # MAGIC
 # MAGIC ## Transformações Aplicadas
 # MAGIC 1. **Filtro de versionamento**: Window Function (PARTITION BY chave natural, ORDER BY _versao_ingestao DESC)
@@ -20,23 +28,44 @@
 # MAGIC 4. **Tratamento de nulls**: Remoção de registros com campos obrigatórios nulos
 # MAGIC 5. **Colunas calculadas**: Ano, trimestre, mês extraídos de DT_REFER
 # MAGIC
+# MAGIC ## Normalização de Escala Monetária
+# MAGIC A CVM publica valores em duas escalas:
+# MAGIC * `MIL` — valor em milhares de reais (necessita multiplicação por 1000)
+# MAGIC * `UNIDADE` — valor já em reais
+# MAGIC
+# MAGIC A Silver normaliza `VL_CONTA` para **reais (unidade)** em todos os registros, preservando `ESCALA_MOEDA` para rastreabilidade. Isso garante que qualquer análise downstream compare valores em uma única escala.
+# MAGIC
 # MAGIC ## Estratégia de Gravação
 # MAGIC **REPLACE WHERE**: Substituição atômica por período - Delta Lake garante operação all-or-nothing, eliminando janela de vulnerabilidade
 
 # COMMAND ----------
 
-# DBTITLE 1,INICIALIZAÇÃO E IMPORTS
+# DBTITLE 1,Carregar configurações
 # MAGIC %run ../05_apoio/config_parametros
 
 # COMMAND ----------
 
 # DBTITLE 1,Inicializar Anos a Processar
-# Inicializar ANOS_PROCESSAR (se ainda não foi inicializado)
-if ANOS_PROCESSAR is None:
-    inicializar_anos_processar()
+# Captura explícita do retorno com guardrail de lista vazia
+# Para reprocessar todos os anos em desenvolvimento: widget MODO_DEV=true
+try:
+    MODO_DEV = dbutils.widgets.get('MODO_DEV').lower() == 'true'
+except Exception:
+    MODO_DEV = False
 
+if MODO_DEV:
+    ANOS_PROCESSAR = inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
+else:
+    ANOS_PROCESSAR = inicializar_anos_processar()
+
+if not ANOS_PROCESSAR:
+    raise ValueError("❌ ANOS_PROCESSAR vazio - nenhum ano para processar")
+
+# COMMAND ----------
+
+# DBTITLE 1,Imports
 from pyspark.sql import Window
-from pyspark.sql.functions import col, to_date, year, quarter, month, row_number, current_timestamp
+from pyspark.sql.functions import col, to_date, year, quarter, month, row_number, current_timestamp, when
 from pyspark.sql.types import DoubleType, IntegerType
 
 # COMMAND ----------
@@ -69,6 +98,13 @@ for ano in ANOS_PROCESSAR:
     df_bronze = spark.table("proj_cvm_01_bronze.102_bpa_dfp") \
         .filter(year(col("DT_REFER")) == ano)
 
+    # GUARDRAIL: Verificar se Bronze tem dados reais para este ano
+    # Se Bronze está vazia, NÃO marca SUCCESS — evita estado irrecuperável
+    count_bronze = df_bronze.count()
+    if count_bronze == 0:
+        print(f"⚠️  Bronze vazia para ano {ano} - pulando sem marcar SUCCESS")
+        continue
+
     window_spec = Window.partitionBy(
         "CNPJ_CIA", "DT_REFER", "CD_CONTA", "ORDEM_EXERC"
     ).orderBy(col("_versao_ingestao").desc())
@@ -91,6 +127,10 @@ for ano in ANOS_PROCESSAR:
             col("DT_REFER").isNotNull() &
             col("CD_CONTA").isNotNull() &
             col("VL_CONTA").isNotNull()
+        ) \
+        .withColumn("VL_CONTA",
+            when(col("ESCALA_MOEDA") == "MIL", col("VL_CONTA") * 1000)
+            .otherwise(col("VL_CONTA"))
         ) \
         .withColumn("ANO", year(col("DT_REFER"))) \
         .withColumn("TRIMESTRE", quarter(col("DT_REFER"))) \
