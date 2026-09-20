@@ -1,10 +1,10 @@
-# GitHub Actions Workflow - Testes de Integração Pipeline CVM
+# GitHub Actions Workflow - Testes de Integracao Pipeline CVM
 # Dispara o job de testes no Databricks e aguarda o resultado.
 # Alimenta o badge de status do README.
 
 name: Testes de Integração
 
-# Trigger apenas manual - não consome DBU a cada push
+# Trigger apenas manual - nao consome DBU a cada push
 on:
   workflow_dispatch:
     inputs:
@@ -33,11 +33,13 @@ jobs:
       - name: Configurar Databricks CLI
         uses: databricks/setup-cli@main
 
-      # Atualiza o job no workspace com a última versão do código
+      # Sobe a definicao do YAML para o workspace
       - name: Deploy Databricks Bundle
         run: databricks bundle deploy --target ${{ inputs.ambiente }}
 
-      # run-now já aguarda o job terminar e falha se o resultado não for SUCCESS.
-      # O ID é posicional: a flag --job-id não existe na CLI atual.
+      # Dispara o job gerenciado pelo bundle, pela chave declarada em
+      # resources/jobs/job_testes_integracao.yml. Nunca por ID fixo:
+      # ID fixo aponta para um job solto no workspace, nao para o que
+      # o deploy acabou de atualizar.
       - name: Rodar testes de integração no Databricks
-        run: databricks jobs run-now 176285066429591 --timeout 30m
+        run: databricks bundle run testes_integracao_cvm --target ${{ inputs.ambiente }}
