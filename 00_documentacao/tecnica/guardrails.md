@@ -15,7 +15,7 @@ Guardrails são validações executadas **ANTES** de modificar dados em tabelas 
 
 ### Contexto
 
-Bronze usa estratégia **DELETE WHERE ano + APPEND**. Guardrails garantem que DELETE só executa se há dados válidos para substituir.
+Bronze usa estratégia **APPEND-ONLY**. Guardrails garantem que apenas dados válidos são inseridos (sem DELETE prévio).
 
 ### Guardrails Implementados
 
@@ -40,12 +40,11 @@ for ano in ANOS_PROCESSAR:
         df_validado = validar_e_projetar_schema(df_raw, COLUNAS_ESSENCIAIS_DRE, "DRE")
         # ↑ Levanta exception se colunas críticas faltam
         
-        # [3/4] DELETE + APPEND (só executa se guardrails passaram)
-        spark.sql(f"DELETE FROM bronze WHERE year(DT_REFER) = {ano}")
-        df_bronze.write.append()
+        # [3/4] APPEND (só executa se guardrails passaram)
+        df_bronze.write.mode("append").saveAsTable("proj_cvm_01_bronze.101_dre_dfp")
         
     except Exception as e:
-        # Bronze NÃO modificada (DELETE não foi executado)
+        # Bronze NÃO modificada (APPEND não foi executado)
         print(f"ERRO: {e}")
         # Registra erro em controle_ingestao
         # Continua para próximo ano
@@ -56,6 +55,7 @@ for ano in ANOS_PROCESSAR:
 
 * **101_cvm_dfp_dre** (célula 5) - DRE
 * **102_cvm_dfp_bpa** (célula 5) - BPA
+* **103_cvm_dfp_bpp** (célula 5) - BPP
 
 ### Função de Validação
 
@@ -97,7 +97,8 @@ def validar_e_projetar_schema(df: DataFrame, colunas_essenciais: List[str], cont
 [
     "CNPJ_CIA", "DT_REFER", "VERSAO", "DENOM_CIA", "CD_CVM",
     "GRUPO_DFP", "MOEDA", "ESCALA_MOEDA", "ORDEM_EXERC",
-    "DT_INI_EXERC", "DT_FIM_EXERC", "CD_CONTA", "DS_CONTA",
+    # "DT_INI_EXERC" removida: BPA não contém esta coluna na fonte CVM
+    "DT_FIM_EXERC", "CD_CONTA", "DS_CONTA",
     "VL_CONTA", "ST_CONTA_FIXA"
 ]
 ```
@@ -108,7 +109,7 @@ def validar_e_projetar_schema(df: DataFrame, colunas_essenciais: List[str], cont
 
 ### Contexto
 
-Silver também usa **DELETE WHERE ano + APPEND**. Guardrail garante que não apaga Silver se Bronze não tem dados para processar.
+Silver usa **REPLACE WHERE** (substituição atômica por período). Guardrail garante que não processa Silver se Bronze não tem dados para o ano.
 
 ### Guardrails Implementados
 
@@ -133,15 +134,17 @@ for ano in ANOS_PROCESSAR:
     df_bronze = spark.table("bronze").filter(...)
     df_silver = transform(df_bronze)
     
-    # DELETE + APPEND
-    spark.sql(f"DELETE FROM silver WHERE ANO = {ano}")
-    df_silver.write.append()
+    # REPLACE WHERE (substituição atômica)
+    df_silver.write.format("delta").mode("overwrite") \
+        .option("replaceWhere", f"ANO = {ano}") \
+        .saveAsTable("proj_cvm_02_silver.201_dre_dfp")
 ```
 
 ### Notebooks que Implementam
 
-* **201_cvm_dfp_dre** (célula 4) - DRE Silver
-* **202_cvm_dfp_bpa** (célula 4) - BPA Silver
+* **201_cvm_dfp_dre** (célula 5) - DRE Silver
+* **202_cvm_dfp_bpa** (célula 5) - BPA Silver
+* **203_cvm_dfp_bpp** (célula 5) - BPP Silver
 
 ---
 

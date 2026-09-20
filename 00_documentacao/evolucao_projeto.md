@@ -15,6 +15,94 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 
 
+## 20/09/2026 - Invariante do Bronze e Cegueira a Republicacoes
+
+### Contexto
+Investigacao sobre por que a estrategia de gravacao do Bronze alternou entre APPEND-ONLY e DELETE+APPEND ao longo de dois meses revelou que a decisao nunca esteve ancorada em um criterio, apenas em uma estrategia. Em 03/08 a validacao de `last_modified_cvm` foi removida e, na sequencia, APPEND-ONLY foi condenado por nao ser idempotente: a premissa que o sustentava foi retirada e depois cobrada. O 103, criado em 10/08, nasceu com a verificacao de idempotencia, divergindo de 101/102 ate a convergencia posterior, que nao ficou registrada.
+
+Diagnostico de 19/09 encontrou a mesma mecanica se repetindo. A funcao `get_anos_com_atualizacao_cvm` falhava com `TypeError: can't compare offset-naive and offset-aware datetimes`, e a chamada foi desconectada em vez de corrigida. A funcao ficou orfa. Resultado: a deteccao conhece apenas dois estados, nunca processado e fantasma (SUCCESS sem dados). Nao existe o estado "processado mas a fonte mudou".
+
+### Invariante (criterio, nao estrategia)
+O Bronze preserva toda versao publicada pela fonte. Idempotencia vem da verificacao previa de `Last-Modified`, nunca de apagar linha.
+
+Decorrencias, que nao sao decisoes independentes:
+* Bronze: APPEND puro + `_versao_ingestao` incremental + verificacao previa
+* Silver: le Bronze filtrando a versao mais recente por Window Function
+* Silver: `REPLACE WHERE` por periodo (substituicao atomica)
+* HTTP a CVM existe apenas em notebooks que buscam dados (003, 004). Notebooks de execucao (101/102/103, 201/202/203) nunca falam com a fonte
+
+Se duplicata reaparecer, o mecanismo de verificacao falhou e deve ser corrigido. A estrategia de gravacao nao esta em discussao.
+
+### Decisoes
+* **004 itera janela 2021-2026 direto, sem depender de ANOS_PROCESSAR** → O notebook cuja funcao e descobrir que a CVM mudou nao pode receber a lista de quem ja assumiu que nada mudou. Quebra a circularidade
+* **Deteccao ganha terceiro estado, comparando o `Last-Modified` do `_metadata.json` da landing contra o `last_modified_cvm` do `controle_ingestao`** → Leitura local, sem rede. Cria o estado "processado mas a fonte mudou" que antes nao existia
+* **`get_anos_com_atualizacao_cvm` removida de vez** → Fazia HTTP em contexto de execucao. `verificar_arquivo_existe_cvm` tambem removida (unica chamadora era a funcao acima)
+
+### Implementado
+* `config_parametros`: `get_novos_anos_para_processar` reescrita com 3 estados: (1) nunca processado, (2) fantasma (SUCCESS sem dados), (3) republicado (`_metadata.json` diverge do controle). Query do controle agora inclui `last_modified_cvm` no select. `anos_processados` usa `.unique()` para dedup
+* `config_parametros`: funcoes `get_anos_com_atualizacao_cvm` e `verificar_arquivo_existe_cvm` removidas. Import `json` adicionado
+* `config_parametros`: comentario de `get_anos_para_processar_inteligente` atualizado de "sem HTTP" para "leitura local, sem HTTP — republicacao detectada via _metadata.json"
+* `004_verificacao_diaria_landing`: celula de inicializacao substitui `inicializar_anos_processar()` por `range(ano_atual - JANELA_ANOS_RELEVANTE, ano_atual + 1)` direto
+* Validacao: 004 executou 2x (04:08 e 04:16 UTC) com SUCCESS, sem o TypeError anterior. Dados de 2021-2026 consistentes entre `_metadata.json` e `controle_ingestao`. Nenhum falso positivo
+
+### Entrada retroativa
+A volta de 101 e 102 para APPEND-ONLY ocorreu em data nao registrada, entre 10/08 e 19/09. A documentacao so foi alinhada ao codigo em 19/09. Registrado aqui para que o historico nao aparente salto de DELETE+APPEND direto para "doc corrigida".
+
+### Key Insight
+Decisao registrada como estrategia nao sobrevive ao primeiro bug, porque um bug e um argumento e "usamos X" nao e. Invariante sobrevive: ele diz o que nao pode ser sacrificado e transforma o bug em "o mecanismo falhou, conserte o mecanismo". Duas vezes o mesmo mecanismo de verificacao de `Last-Modified` foi removido por motivo pequeno, e nas duas a arquitetura perdeu capacidade sem que a perda ficasse registrada. Mecanismo que sustenta invariante precisa de teste, senao ele some em silencio e o desenho sem ele deixa de fazer sentido.
+
+---
+
+## 19/09/2026 - Normalização de Escala Monetária e Widget MODO_DEV
+
+### Contexto
+Avaliação da Silver revelou que `VL_CONTA` mantinha duas escalas sem normalização: ~540 empresas em MIL (milhares) e ~15 em UNIDADE (reais). Comparar ou somar valores entre empresas sem normalizar gera resultados errados por fator de 1000x. A mesma sessão corrigiu o padrão de inicialização de anos, que usava lista hardcoded.
+
+### Decisões
+* **Normalizar na Silver, não na Gold** → Silver é a camada de padronização; deixar para Gold exigiria que todo consumidor downstream verificasse ESCALA_MOEDA
+* **Widget MODO_DEV em vez de hardcoded** → `dbutils.widgets.get('MODO_DEV')` permite reprocessar todos os anos em dev sem alterar código; default False é seguro para jobs
+* **`get_anos_disponiveis_cvm()` em vez de lista fixa** → Função existente retorna 2010-ano corrente dinamicamente; lista hardcoded fica obsoleta ao adicionar novo ano
+* **Preservar ESCALA_MOEDA** → Coluna mantida para rastreabilidade; Bronze preserva valor original
+
+### Implementado
+* Notebooks 201, 202, 203 (Silver): normalização `when(ESCALA_MOEDA == "MIL", VL_CONTA * 1000).otherwise(VL_CONTA)` após cast de tipos
+* Notebooks 101-203 (6 notebooks): widget `MODO_DEV` na célula de inicialização — `False` por default (job/produção), `true` via widget UI para reprocessamento em dev
+* Notebooks 201, 202, 203: separação de imports em célula dedicada, guardrail `raise` na captura de `ANOS_PROCESSAR`, títulos de células corrigidos
+* Validação: Petrobras (MIL) 497.549.000 → 497.549.000.000 (x1000); CELPAR (UNIDADE) 80.854.699 mantido
+* Reprocessamento completo: anos 2021-2026 normalizados nas três tabelas Silver
+
+### Key Insight
+Hardcoded parece inofensivo no momento da escrita mas é dívida técnica silenciosa — uma lista de anos funciona hoje e quebra silenciosamente quando um novo ano é adicionado. Widget com fallback dinâmico elimina a classe inteira de problema: o desenvolvedor não precisa saber quais anos existem, e o job não precisa receber parâmetro para funcionar corretamente.
+
+---
+
+## 📅 19/09/2026 - Correção de Loop Multi-célula, Guardrail Silver e Refatoração da Detecção
+
+### Contexto
+Pipeline Bronze apresentava lacunas irrecuperáveis: DRE Bronze só tinha 2024-2026 (faltava 2021-2023), Silver marcava SUCCESS com 0 linhas quando Bronze falhava, e o orquestrador fazia HTTP para a CVM dentro do job de execução — lento e responsabilidade do job diário. Análise revelou três bugs estruturais e discrepâncias entre documentação e código.
+
+### Decisões
+* **Consolidar loop multi-célula em célula única (101, 102)** → O Databricks executava o loop só na célula de extração; transformação/escrita rodavam uma vez com a última iteração. Padrão correto já existia no BPP (103)
+* **Implementar guardrail Silver em 201, 202, 203** → Bronze vazia → skip sem SUCCESS → nunca cria estado irrecuperável. Guardrail já estava documentado em guardrails.md mas não implementado
+* **Remover HTTP da CVM da detecção** → `get_anos_com_atualizacao_cvm` não é mais chamado por `get_anos_para_processar_inteligente`. Busca por arquivos novos é responsabilidade do job diário
+* **Remover orquestrador do job semanal** → Cada notebook Bronze já chama `inicializar_anos_processar()` independentemente; orquestrador era redundante e fazia HTTP lento. Job agora: Bronze em paralelo → Silver respectivo
+* **Adicionar fontes Silver na detecção** → `inicializar_anos_processar()` agora consulta 6 fontes (3 Bronze + 3 Silver). Antes só consultava Bronze; Silver nunca detectava anos faltantes
+* **Dupla checagem na detecção** → `get_novos_anos_para_processar` verifica dados reais na tabela destino (não confia só no SUCCESS do controle). Anos "fantasma" (SUCCESS sem dados) são reprocessados
+
+### Implementado
+* Bronze 101/102: loop multi-célula consolidado em célula única (padrão BPP)
+* Silver 201/202/203: guardrail `count_bronze == 0 → skip` implementado
+* config_parametros: `get_anos_com_atualizacao_cvm` removido da detecção
+* config_parametros: `fontes_config` expandido de 3 para 6 fontes (Bronze + Silver)
+* config_parametros: `get_novos_anos_para_processar` verifica dados reais via `FONTE_TABELA_DESTINO`
+* Job 890867014997453: task orquestrador removida; Bronze tasks sem dependência
+* Validação final: Bronze e Silver com 2021-2026 completos em todas as 6 tabelas
+
+### Key Insight
+A "inteligência" do pipeline era frágil porque confiava em flags de controle sem verificar o estado real dos dados. Silver marcava SUCCESS com 0 linhas e o orquestrador nunca reprocessava — criando buracos irrecuperáveis. Princípio corrigido: verificação é sempre feita "na tabela", não só via flag do controle.
+
+---
+
 ## 📅 19/09/2026 - Auditoria de Jobs, Versionamento e Bug Off-by-One
 
 ### Contexto

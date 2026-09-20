@@ -119,11 +119,12 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 
 ### 1. Bronze (Ingestão Idempotente)
 
-**Objetivo**: Captura bruta com 1 versão por ano (DELETE+APPEND)
+**Objetivo**: Captura bruta com histórico completo (APPEND-ONLY)
 
 **Notebooks**:
 * `101_cvm_dfp_dre.py` → Tabela `proj_cvm_01_bronze.101_dre_dfp`
 * `102_cvm_dfp_bpa.py` → Tabela `proj_cvm_01_bronze.102_bpa_dfp`
+* `103_cvm_dfp_bpp.py` → Tabela `proj_cvm_01_bronze.103_bpp_dfp`
 
 **Pipeline**:
 1. **Leitura** do ZIP na Landing Zone
@@ -140,24 +141,23 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
        .withColumn("_ingest_ts", current_timestamp())
    )
    ```
-4. **Gravação idempotente**: `DELETE WHERE ano + APPEND`
+4. **Gravação**: `APPEND-ONLY` (histórico completo)
    ```python
-   spark.sql(f"DELETE FROM proj_cvm_01_bronze.101_dre_dfp WHERE year(DT_REFER) = {ano}")
    df_bronze.write.mode("append").saveAsTable("proj_cvm_01_bronze.101_dre_dfp")
    ```
-   - Sempre 1 versão por ano
-   - Rodar 10x = rodar 1x (idempotência)
-   - Sem acúmulo de versões duplicadas
+   - Preserva histórico de versões (múltiplas execuções = múltiplas versões)
+   - Silver aplica Window Function para selecionar versão mais recente
+   - Idempotência garantida via controle + verificação de dados reais
 
 **Características**:
-* **Idempotente**: DELETE WHERE ano garante 1 versão por ano, sem duplicatas técnicas
-* **Auto-corretivo**: Bugs não acumulam lixo - próxima execução limpa
-* **Fail-safe**: Guardrails validam ANTES do DELETE (dados preservados em caso de erro)
-* **Sem validação de last_modified**: Simplifica lógica, confiança na idempotência estrutural
+* **Idempotente**: APPEND-ONLY preserva histórico, Silver filtra versão mais recente
+* **Auto-corretivo**: Bugs não acumulam lixo - próxima execução corrige
+* **Fail-safe**: Guardrails validam ANTES do APPEND (dados preservados em caso de erro)
+* **Verificação de Last-Modified**: Compara `_metadata.json` da landing contra `controle_ingestao` para detectar republicações
 
 > **Guardrails**: Validações detalhadas em [guardrails.md](guardrails.md)
 
-**Estratégia de Gravação**: `DELETE WHERE ano + APPEND`
+**Estratégia de Gravação**: `APPEND-ONLY` (histórico completo preservado)
 
 ---
 
@@ -168,14 +168,16 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 **Notebooks**:
 * `201_cvm_dfp_dre.py` → Tabela `proj_cvm_02_silver.201_dre_dfp`
 * `202_cvm_dfp_bpa.py` → Tabela `proj_cvm_02_silver.202_bpa_dfp`
+* `203_cvm_dfp_bpp.py` → Tabela `proj_cvm_02_silver.203_bpp_dfp`
 
 **Pipeline**:
-1. **Leitura direta da Bronze** (sem Window Function - Bronze idempotente tem 1 versão)
+1. **Leitura da Bronze com Window Function** (filtro de versão mais recente via `_versao_ingestao`)
    ```python
    df_bronze = spark.table("proj_cvm_01_bronze.101_dre_dfp").filter(year(col("DT_REFER")) == ano)
    ```
 2. **Transformações**:
    - Conversão de tipos (`DT_REFER` → date, `VL_CONTA` → double)
+   - Normalização de escala monetária (`VL_CONTA` × 1000 quando `ESCALA_MOEDA = "MIL"`)
    - Filtro de nulos (campos críticos)
    - Enriquecimento (colunas `ANO`, `TRIMESTRE`, `MES`, `DT_PROCESSAMENTO`)
 3. **Gravação**: `REPLACE WHERE ano`
@@ -186,8 +188,8 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 
 **Características**:
 * **Curada**: Sem duplicatas, tipos corretos
-* **Simples**: Sem Window Function (Bronze idempotente)
-* **Fail-safe**: Guardrail protege Silver de DELETE sem dados
+* **Versionada**: Window Function seleciona versão mais recente da Bronze
+* **Fail-safe**: Guardrail protege Silver de processar Bronze vazia
 
 > **Guardrails**: Validações detalhadas em [guardrails.md](guardrails.md)
 
@@ -211,13 +213,19 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 
 ### Orquestração
 
-**Coordenação**: `000_orquestrador_pipeline.py`
+**Detecção**: Cada notebook Bronze/Silver chama `inicializar_anos_processar()` de `config_parametros.py`
 
-**Pre-flight checks**:
-1. Validar existência de arquivos na Landing Zone
-2. Verificar última ingestão (tabela de controle)
-3. Detectar novos períodos ou correções
-4. Executar notebooks na ordem correta
+**Detecção inteligente** (leitura local, sem HTTP):
+1. Consulta tabela de controle (`controle_ingestao`) para identificar anos processados
+2. Verifica dados reais na tabela destino (não confia só no SUCCESS)
+3. Compara `Last-Modified` do `_metadata.json` na landing contra `last_modified_cvm` do controle
+4. Três estados: (1) nunca processado, (2) fantasma (SUCCESS sem dados), (3) republicado (metadado diverge do controle)
+5. Aplica janela temporal (`JANELA_ANOS_RELEVANTE`)
+6. Consolida 6 fontes: 3 Bronze + 3 Silver
+
+> **Nota**: O notebook `000_orquestrador_pipeline.py` existe em `05_apoio/` mas foi removido do job de produção (890867014997453) em 19/09/2026. A detecção agora é distribuída — cada notebook chama `inicializar_anos_processar()` independentemente. Busca por arquivos novos na CVM (HTTP) é responsabilidade do job diário de download.
+>
+> **004_verificacao_diaria_landing**: Itera a janela temporal diretamente (`range(ano_atual - JANELA_ANOS_RELEVANTE, ano_atual + 1)`), sem depender de `inicializar_anos_processar()`. Esta independência é intencional: o notebook que descobre mudanças na fonte não pode receber a lista de quem já assumiu que nada mudou.
 
 **Tabela de Controle**: `proj_cvm_05_apoio.controle_ingestao`
 * Rastreia cada ingestão (ano, timestamp, versão)
@@ -240,14 +248,22 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 
 **Uso em notebooks**:
 ```python
-# Célula 2: INICIALIZAÇÃO E IMPORTS
+# Célula 2: Carregar configurações
 %run ../05_apoio/config_parametros  # Notebook em 01_bronze/ ou 02_silver/
 # ou
 %run ./config_parametros  # Notebook em 05_apoio/
 
-# Inicializar ANOS_PROCESSAR (se ainda não foi inicializado)
-if ANOS_PROCESSAR is None:
-    inicializar_anos_processar()
+# Célula 3: Inicializar Anos a Processar
+# Widget MODO_DEV: False por default (job/produção). True via widget UI para reprocessar todos os anos.
+try:
+    MODO_DEV = dbutils.widgets.get('MODO_DEV').lower() == 'true'
+except Exception:
+    MODO_DEV = False
+
+if MODO_DEV:
+    ANOS_PROCESSAR = inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
+else:
+    ANOS_PROCESSAR = inicializar_anos_processar()
 ```
 
 **Função `inicializar_anos_processar()`**:
@@ -259,8 +275,10 @@ if ANOS_PROCESSAR is None:
 
 **Exemplo de override**:
 ```python
-# Forçar processamento de anos específicos
-inicializar_anos_processar(force_anos=[2023, 2024])
+# Reprocessar todos os anos disponíveis (desenvolvimento)
+# Via widget UI: criar widget MODO_DEV com valor "true"
+# Ou via código:
+inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
 ```
 
 **Benefícios**:
@@ -313,11 +331,12 @@ inicializar_anos_processar(force_anos=[2023, 2024])
 | --- | --- | --- |
 | `201_cvm_dfp_dre.py` | `proj_cvm_02_silver.201_dre_dfp` | DRE transformada |
 | `202_cvm_dfp_bpa.py` | `proj_cvm_02_silver.202_bpa_dfp` | BPA transformada |
+| `203_cvm_dfp_bpp.py` | `proj_cvm_02_silver.203_bpp_dfp` | BPP transformada |
 
 **Características Técnicas:**
 * **Filtro de versão**: Window Function (ROW_NUMBER) para selecionar versão mais recente
 * **Projeção explícita**: `.select()` de todas as colunas do DDL (descarta extras de Bronze)
-* **Transformações**: Conversão de tipos, normalização, colunas derivadas (ANO, TRIMESTRE, MES)
+* **Transformações**: Conversão de tipos, normalização de escala monetária (MIL → reais), colunas derivadas (ANO, TRIMESTRE, MES)
 * **Estratégia**: REPLACE WHERE (substituição atômica por período - elimina janela de vulnerabilidade do DELETE+APPEND)
 * **Particionamento**: Por ano (`ANO`)
 

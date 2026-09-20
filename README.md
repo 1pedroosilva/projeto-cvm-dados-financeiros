@@ -23,13 +23,13 @@ Os dados são extraídos do [Portal de Dados Abertos da CVM](https://dados.cvm.g
 **Bronze** (`01_bronze/`): Preservação dos dados brutos da fonte
 * 3 notebooks: `101_cvm_dfp_dre`, `102_cvm_dfp_bpa`, `103_cvm_dfp_bpp`
 * Tabelas: `proj_cvm_01_bronze.101_dre_dfp`, `102_bpa_dfp`, `103_bpp_dfp`
-* Estratégia: DELETE WHERE ano + APPEND (idempotente)
+* Estratégia: APPEND-ONLY (histórico completo, idempotente)
 * Guardrails: arquivo vazio, schema inválido
 
 **Silver** (`02_silver/`): Dados limpos, tipados e enriquecidos
 * 3 notebooks: `201_cvm_dfp_dre`, `202_cvm_dfp_bpa`, `203_cvm_dfp_bpp`
 * Tabelas: `proj_cvm_02_silver.201_dre_dfp`, `202_bpa_dfp`, `203_bpp_dfp`
-* Transformações: conversão de tipos, filtro de duplicatas, colunas derivadas (ANO, TRIMESTRE, MES)
+* Transformações: conversão de tipos, normalização de escala monetária, filtro de duplicatas, colunas derivadas (ANO, TRIMESTRE, MES)
 * Estratégia: REPLACE WHERE (substituição atômica por período)
 * Guardrails: bronze vazia para o ano
 
