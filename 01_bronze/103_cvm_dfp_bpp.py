@@ -36,16 +36,8 @@
 
 # DBTITLE 1,Inicializar Anos a Processar
 # Captura explícita do retorno com guardrail de lista vazia
-# Para reprocessar todos os anos em desenvolvimento: widget MODO_DEV=true
-try:
-    MODO_DEV = dbutils.widgets.get('MODO_DEV').lower() == 'true'
-except Exception:
-    MODO_DEV = False
-
-if MODO_DEV:
-    ANOS_PROCESSAR = inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
-else:
-    ANOS_PROCESSAR = inicializar_anos_processar()
+# CARGA=completa força todos os anos
+ANOS_PROCESSAR = inicializar_anos_processar()
 
 if not ANOS_PROCESSAR:
     raise ValueError("❌ ANOS_PROCESSAR vazio - nenhum ano para processar")
@@ -203,7 +195,7 @@ def gravar_delta(df_bronze, ano, versao_atual):
     df_bronze.write \
         .format("delta") \
         .mode("append") \
-        .saveAsTable("proj_cvm_01_bronze.103_bpp_dfp")
+        .saveAsTable(f"{SCHEMA_BRONZE}.103_bpp_dfp")
     
     logger.info(f"[GRAVAÇÃO] ✓ Ano {ano} gravado com sucesso (versão {versao_atual})")
 
@@ -218,7 +210,7 @@ def registrar_controle_sucesso(ano, last_modified_cvm, versao_atual):
     Registra processamento bem-sucedido na tabela de controle.
     """
     spark.sql(f"""
-        INSERT INTO proj_cvm_05_apoio.controle_ingestao
+        INSERT INTO {SCHEMA_APOIO}.controle_ingestao
             (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
         VALUES (
             'bpp',
@@ -238,7 +230,7 @@ def registrar_controle_falha(ano, erro):
     """
     try:
         spark.sql(f"""
-            INSERT INTO proj_cvm_05_apoio.controle_ingestao
+            INSERT INTO {SCHEMA_APOIO}.controle_ingestao
                 (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
             VALUES (
                 'bpp',
@@ -279,7 +271,7 @@ for ano in ANOS_PROCESSAR:
         logger.info(f"[IDEMPOTÊNCIA] Verificando se ano já foi processado...")
         ja_processado = spark.sql(f"""
             SELECT COUNT(*) as count
-            FROM proj_cvm_05_apoio.controle_ingestao
+            FROM {SCHEMA_APOIO}.controle_ingestao
             WHERE fonte = 'bpp'
               AND ano = {ano}
               AND last_modified_cvm = '{last_modified_cvm}'
@@ -294,7 +286,7 @@ for ano in ANOS_PROCESSAR:
         # 3. Buscar próxima versão de ingestão para este ano
         versao_atual = spark.sql(f"""
             SELECT COALESCE(MAX(_versao_ingestao), 0) + 1 as proxima_versao
-            FROM proj_cvm_01_bronze.103_bpp_dfp
+            FROM {SCHEMA_BRONZE}.103_bpp_dfp
             WHERE year(DT_REFER) = {ano}
         """).collect()[0]['proxima_versao']
         

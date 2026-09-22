@@ -1,0 +1,95 @@
+{
+  "_sobre": "Resolucao de ambiente e de estrategia de carga do projeto CVM. Fonte unica: config_parametros.py le este arquivo em tempo de execucao e deriva dele todos os nomes de catalogo, schema, tabela e volume. Nenhum notebook monta nome por conta propria. Nao confundir com data contract (ODCS): este arquivo nao descreve colunas nem qualidade de dado.",
+  "versao": "1.0.0",
+  "atualizado_em": "2026-09-20",
+
+  "ambiente": {
+    "_sobre": "ONDE escrever. Eixo independente da carga.",
+    "valores_aceitos": ["dev", "test", "prod"],
+    "padrao": "dev",
+    "_nota_padrao": "Notebook aberto e executado na mao no workspace nao recebe parametro. Cai em dev, que e o caso comum durante o desenvolvimento. So o disparo automatizado declara ambiente.",
+    "precedencia": [
+      "widget:AMBIENTE",
+      "variavel_ambiente:AMBIENTE",
+      "padrao"
+    ],
+    "_nota_precedencia": "Mecanismo unico. O widget SCHEMA_SUFFIX foi descontinuado: era uma segunda forma de dizer a mesma coisa.",
+    "_origem_do_disparo": "GitHub Actions via bundle deploy --target test => test. Execucao manual do desenvolvedor no workspace => dev."
+  },
+
+  "carga": {
+    "_sobre": "QUANTO processar. Eixo independente do ambiente. As quatro combinacoes sao validas.",
+    "valores_aceitos": ["incremental", "completa"],
+    "padrao": "incremental",
+    "precedencia": [
+      "widget:CARGA",
+      "variavel_ambiente:CARGA",
+      "padrao"
+    ],
+    "semantica": {
+      "incremental": "Deteccao normal: processa apenas anos novos ou republicados pela CVM.",
+      "completa": "Forca todos os anos disponiveis. Equivale a inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())."
+    },
+    "_nota_migracao": "Substitui o widget MODO_DEV. MODO_DEV=true passa a ser CARGA=completa. O nome antigo dizia onde rodava; o novo diz o que faz.",
+    "_nota_test": "O job de teste precisa declarar CARGA=completa: em schema recem-criado nao ha estado anterior e a deteccao devolveria lista vazia, disparando o guardrail de ANOS_PROCESSAR vazio."
+  },
+
+  "composicao": {
+    "schema": "{prefixo}_{ordem}_{camada}",
+    "nome_qualificado": "{catalogo}.{schema}.{tabela}",
+    "_exemplo_dev": "workspace.proj_cvm_dev_01_bronze.101_dre_dfp",
+    "_exemplo_test": "workspace.proj_cvm_test_01_bronze.101_dre_dfp"
+  },
+
+  "camadas": {
+    "bronze": "01",
+    "silver": "02",
+    "gold": "03",
+    "apoio": "05"
+  },
+
+  "ambientes": {
+    "dev": {
+      "catalogo": "workspace",
+      "prefixo": "proj_cvm_dev",
+      "existe": true,
+      "_nota": "Unico ambiente instanciado hoje."
+    },
+    "test": {
+      "catalogo": "workspace",
+      "prefixo": "proj_cvm_test",
+      "existe": false,
+      "_nota": "Nasce quando houver teste de integracao real. Ate la, o config deve recusar com mensagem explicita."
+    },
+    "prod": {
+      "catalogo": "workspace",
+      "prefixo": "proj_cvm_prod",
+      "existe": false,
+      "_nota": "Declarado para demonstrar que o pipeline resolve tres ambientes. Nao sera instanciado: sem consumidor real, prod separado seria over-engineering. O config deve recusar com mensagem explicita."
+    }
+  },
+
+  "volume": {
+    "_sobre": "O volume da Landing Zone mora num schema proprio, sem ordem nem camada. Nao segue a regra de composicao de schema.",
+    "schema": "proj_cvm",
+    "nome": "landing",
+    "caminho": "/Volumes/{catalogo}/{schema}/{nome}",
+    "subpasta_dfp": "dfp",
+    "compartilhado_entre_ambientes": true,
+    "_nota_compartilhamento": "Os tres ambientes leem o mesmo volume. O dado bruto da CVM e imutavel e caro de rebaixar. Consequencia aceita: o teste de integracao nao exercita o download. Para separar, trocar para false e derivar o schema do volume do prefixo do ambiente."
+  },
+
+  "invariantes": {
+    "_sobre": "O que NAO muda entre ambientes. Nome de tabela e identico nos tres: so o schema muda. Nunca criar sufixo de ambiente em nome de tabela.",
+    "tabelas": {
+      "bronze": ["101_dre_dfp", "102_bpa_dfp", "103_bpp_dfp"],
+      "silver": ["201_dre_dfp", "202_bpa_dfp", "203_bpp_dfp"],
+      "apoio": ["controle_ingestao", "observabilidade_execucoes"]
+    }
+  },
+
+  "fora_do_escopo": {
+    "_sobre": "Nao parametrizar. Analise pontual aponta para o ambiente que o analista escolher.",
+    "caminhos": ["04_exploracao/"]
+  }
+}

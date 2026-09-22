@@ -57,16 +57,8 @@
 
 # DBTITLE 1,Inicializar Anos a Processar
 # Captura explícita do retorno com guardrail de lista vazia
-# Para reprocessar todos os anos em desenvolvimento: widget MODO_DEV=true
-try:
-    MODO_DEV = dbutils.widgets.get('MODO_DEV').lower() == 'true'
-except Exception:
-    MODO_DEV = True
-
-if MODO_DEV:
-    ANOS_PROCESSAR = inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
-else:
-    ANOS_PROCESSAR = inicializar_anos_processar()
+# CARGA=completa força todos os anos
+ANOS_PROCESSAR = inicializar_anos_processar()
 
 if not ANOS_PROCESSAR:
     raise ValueError("❌ ANOS_PROCESSAR vazio - nenhum ano para processar")
@@ -98,8 +90,8 @@ logger.info("="*80)
 logger.info("SILVER - BPP (203) - Balanço Patrimonial Passivo")
 logger.info("="*80)
 logger.info(f"Anos a processar: {ANOS_PROCESSAR}")
-logger.info(f"Tabela origem (Bronze): proj_cvm_01_bronze.103_bpp_dfp")
-logger.info(f"Tabela destino (Silver): proj_cvm_02_silver.203_bpp_dfp")
+logger.info(f"Tabela origem (Bronze): {SCHEMA_BRONZE}.103_bpp_dfp")
+logger.info(f"Tabela destino (Silver): {SCHEMA_SILVER}.203_bpp_dfp")
 logger.info(f"Total de anos: {len(ANOS_PROCESSAR)}")
 logger.info("="*80)
 
@@ -123,7 +115,7 @@ for ano in ANOS_PROCESSAR:
         # Particiona por chave natural e seleciona versão mais recente via Window Function
         logger.info("[1/4] Aplicando filtro de versionamento...")
         
-        df_bronze = spark.table("proj_cvm_01_bronze.103_bpp_dfp") \
+        df_bronze = spark.table(f"{SCHEMA_BRONZE}.103_bpp_dfp") \
             .filter(year(col("DT_REFER")) == ano)
         
         # GUARDRAIL: Verificar se Bronze tem dados reais para este ano
@@ -216,7 +208,7 @@ for ano in ANOS_PROCESSAR:
             .format("delta") \
             .mode("overwrite") \
             .option("replaceWhere", f"ANO = {ano}") \
-            .saveAsTable("proj_cvm_02_silver.203_bpp_dfp")
+            .saveAsTable(f"{SCHEMA_SILVER}.203_bpp_dfp")
         
         logger.info(f"[GRAVAÇÃO] ✓ Ano {ano} gravado com sucesso")
         
@@ -224,12 +216,12 @@ for ano in ANOS_PROCESSAR:
         logger.info("[4/4] Registrando processamento...")
         
         spark.sql(f"""
-            INSERT INTO proj_cvm_05_apoio.controle_ingestao
+            INSERT INTO {SCHEMA_APOIO}.controle_ingestao
                 (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
             VALUES (
                 'bpp_silver',
                 {ano},
-                'proj_cvm_02_silver.203_bpp_dfp',
+                '{SCHEMA_SILVER}.203_bpp_dfp',
                 NULL,
                 1,
                 current_timestamp(),
@@ -250,12 +242,12 @@ for ano in ANOS_PROCESSAR:
         # Registrar falha na tabela de controle
         try:
             spark.sql(f"""
-                INSERT INTO proj_cvm_05_apoio.controle_ingestao
+                INSERT INTO {SCHEMA_APOIO}.controle_ingestao
                     (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
                 VALUES (
                     'bpp_silver',
                     {ano},
-                    'proj_cvm_02_silver.203_bpp_dfp',
+                    '{SCHEMA_SILVER}.203_bpp_dfp',
                     NULL,
                     NULL,
                     current_timestamp(),

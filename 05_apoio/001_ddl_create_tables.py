@@ -17,7 +17,7 @@
 # MAGIC * **Metadados técnicos**: Colunas `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts`, `_source_file` para auditoria
 # MAGIC
 # MAGIC ## Estrutura Criada
-# MAGIC * **Schemas**: `proj_cvm_01_bronze`, `proj_cvm_02_silver`, `proj_cvm_03_gold`
+# MAGIC * **Schemas**: definidos por SCHEMA_BRONZE, SCHEMA_SILVER, SCHEMA_GOLD no config_parametros
 # MAGIC * **Tabelas Bronze**: `101_dre_dfp`, `102_bpa_dfp` (append-only com versionamento)
 # MAGIC * **Tabelas Silver**: `201_dre_dfp`, `202_bpa_dfp` (versão mais recente + enriquecimento)
 # MAGIC
@@ -26,20 +26,25 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,CARREGAR CONFIG
+# MAGIC %run ./config_parametros
+
+# COMMAND ----------
+
 # DBTITLE 1,CRIAÇÃO DE SCHEMAS
 # Criação de schemas Bronze, Silver e Gold
-spark.sql("""
-CREATE SCHEMA IF NOT EXISTS proj_cvm_01_bronze
+spark.sql(f"""
+CREATE SCHEMA IF NOT EXISTS {SCHEMA_BRONZE}
 COMMENT 'Camada Bronze - Ingestão bruta de dados da CVM sem transformações'
 """)
 
-spark.sql("""
-CREATE SCHEMA IF NOT EXISTS proj_cvm_02_silver
+spark.sql(f"""
+CREATE SCHEMA IF NOT EXISTS {SCHEMA_SILVER}
 COMMENT 'Camada Silver - Dados transformados, limpos e padronizados'
 """)
 
-spark.sql("""
-CREATE SCHEMA IF NOT EXISTS proj_cvm_03_gold
+spark.sql(f"""
+CREATE SCHEMA IF NOT EXISTS {SCHEMA_GOLD}
 COMMENT 'Camada Gold - Métricas de negócio e agregações para análise'
 """)
 
@@ -66,15 +71,15 @@ def apply_schema_migration_if_needed():
     
     migrations = [
         # Migration 001: Correção tipos STRING → INT/TIMESTAMP (31/07/2026)
-        ("proj_cvm_05_apoio.controle_ingestao", "last_modified_cvm", "TIMESTAMP",
+        (f"{SCHEMA_APOIO}.controle_ingestao", "last_modified_cvm", "TIMESTAMP",
          "Permite comparação direta com datetime HTTP Last-Modified"),
-        ("proj_cvm_02_silver.201_dre_dfp", "VERSAO", "INT",
+        (f"{SCHEMA_SILVER}.201_dre_dfp", "VERSAO", "INT",
          "Alinhamento com cast aplicado na transformação Silver"),
-        ("proj_cvm_02_silver.201_dre_dfp", "CD_CVM", "INT",
+        (f"{SCHEMA_SILVER}.201_dre_dfp", "CD_CVM", "INT",
          "Alinhamento com cast aplicado na transformação Silver"),
-        ("proj_cvm_02_silver.202_bpa_dfp", "VERSAO", "INT",
+        (f"{SCHEMA_SILVER}.202_bpa_dfp", "VERSAO", "INT",
          "Alinhamento com cast aplicado na transformação Silver"),
-        ("proj_cvm_02_silver.202_bpa_dfp", "CD_CVM", "INT",
+        (f"{SCHEMA_SILVER}.202_bpa_dfp", "CD_CVM", "INT",
          "Alinhamento com cast aplicado na transformação Silver"),
     ]
     
@@ -107,13 +112,13 @@ def apply_schema_migration_if_needed():
     # dupla contagem em somas (totalizadoras + analíticas) e distinguir
     # contas aditivas (soma de filhas) de derivadas (fórmula entre irmãs)
     add_column_migrations = [
-        ("proj_cvm_02_silver.201_dre_dfp", "TIPO_CONTA", "STRING",
+        (f"{SCHEMA_SILVER}.201_dre_dfp", "TIPO_CONTA", "STRING",
          "Classificação TOTALIZADORA vs ANALITICA (EDA 001)"),
-        ("proj_cvm_02_silver.201_dre_dfp", "TIPO_ESTRUTURAL", "STRING",
+        (f"{SCHEMA_SILVER}.201_dre_dfp", "TIPO_ESTRUTURAL", "STRING",
          "Classificação ADITIVA vs DERIVADA para totalizadoras da DRE (EDA 001)"),
-        ("proj_cvm_02_silver.202_bpa_dfp", "TIPO_CONTA", "STRING",
+        (f"{SCHEMA_SILVER}.202_bpa_dfp", "TIPO_CONTA", "STRING",
          "Classificação TOTALIZADORA vs ANALITICA (EDA 002)"),
-        ("proj_cvm_02_silver.203_bpp_dfp", "TIPO_CONTA", "STRING",
+        (f"{SCHEMA_SILVER}.203_bpp_dfp", "TIPO_CONTA", "STRING",
          "Classificação TOTALIZADORA vs ANALITICA (EDA 003)"),
     ]
     
@@ -142,8 +147,8 @@ apply_schema_migration_if_needed()
 
 # DBTITLE 1,CRIAÇÃO DA TABELA BRONZE - 101_dre_dfp
 # Tabela Bronze: DRE (dados brutos as-is + metadados técnicos de ingestão)
-spark.sql("""
-CREATE TABLE IF NOT EXISTS proj_cvm_01_bronze.101_dre_dfp (
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_BRONZE}.101_dre_dfp (
   CNPJ_CIA STRING,
   DT_REFER STRING,
   VERSAO STRING,
@@ -168,14 +173,14 @@ USING DELTA
 COMMENT 'DRE consolidada - Dados brutos extraídos do portal CVM. Mantém estrutura original + metadados técnicos + versionamento (_versao_ingestao preserva TODAS as versões).'
 """)
 
-print("✅ Tabela proj_cvm_01_bronze.101_dre_dfp criada")
+print(f"✅ Tabela {SCHEMA_BRONZE}.101_dre_dfp criada")
 
 # COMMAND ----------
 
 # DBTITLE 1,CRIAÇÃO DA TABELA BRONZE - 102_bpa_dfp
 # Tabela Bronze: BPA (dados brutos as-is + metadados técnicos de ingestão)
-spark.sql("""
-CREATE TABLE IF NOT EXISTS proj_cvm_01_bronze.102_bpa_dfp (
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_BRONZE}.102_bpa_dfp (
   CNPJ_CIA STRING,
   DT_REFER STRING,
   VERSAO STRING,
@@ -200,14 +205,14 @@ USING DELTA
 COMMENT 'BPA consolidado - Dados brutos extraídos do portal CVM. Mantém estrutura original + metadados técnicos + versionamento (_versao_ingestao preserva TODAS as versões).'
 """)
 
-print("✅ Tabela proj_cvm_01_bronze.102_bpa_dfp criada")
+print(f"✅ Tabela {SCHEMA_BRONZE}.102_bpa_dfp criada")
 
 # COMMAND ----------
 
 # DBTITLE 1,CRIAÇÃO DA TABELA BRONZE - 103_bpp_dfp
 # Tabela Bronze: BPP (dados brutos as-is + metadados técnicos de ingestão)
-spark.sql("""
-CREATE TABLE IF NOT EXISTS proj_cvm_01_bronze.103_bpp_dfp (
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_BRONZE}.103_bpp_dfp (
   CNPJ_CIA STRING,
   DT_REFER STRING,
   VERSAO STRING,
@@ -231,14 +236,14 @@ USING DELTA
 COMMENT 'BPP consolidado - Dados brutos extraídos do portal CVM. Mantém estrutura original + metadados técnicos + versionamento (_versao_ingestao preserva TODAS as versões).'
 """)
 
-print("✅ Tabela proj_cvm_01_bronze.103_bpp_dfp criada")
+print(f"✅ Tabela {SCHEMA_BRONZE}.103_bpp_dfp criada")
 
 # COMMAND ----------
 
 # DBTITLE 1,CRIACAO DA TABELA SILVER - 203_bpp_dfp
 # Tabela Silver: BPP transformada (dados limpos e enriquecidos, particionada por ANO)
-spark.sql("""
-CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.203_bpp_dfp (
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.203_bpp_dfp (
   CNPJ_CIA STRING,
   DT_REFER DATE,
   VERSAO INT,
@@ -267,14 +272,14 @@ PARTITIONED BY (ANO)
 COMMENT 'BPP transformado - Dados limpos, tipados e enriquecidos com colunas temporais. Particionada por ano para DELETE+APPEND incremental eficiente.'
 """)
 
-print("✅ Tabela proj_cvm_02_silver.203_bpp_dfp criada")
+print(f"✅ Tabela {SCHEMA_SILVER}.203_bpp_dfp criada")
 
 # COMMAND ----------
 
 # DBTITLE 1,CRIACAO DA TABELA SILVER - 201_dre_dfp
 # Tabela Silver: DRE transformada (dados limpos e enriquecidos, particionada por ANO)
-spark.sql("""
-CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.201_dre_dfp (
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.201_dre_dfp (
   CNPJ_CIA STRING,
   DT_REFER DATE,
   VERSAO INT,
@@ -305,14 +310,14 @@ PARTITIONED BY (ANO)
 COMMENT 'DRE transformada - Dados limpos, tipados e enriquecidos com colunas temporais. Particionada por ano para MERGE incremental eficiente.'
 """)
 
-print("✅ Tabela proj_cvm_02_silver.201_dre_dfp criada")
+print(f"✅ Tabela {SCHEMA_SILVER}.201_dre_dfp criada")
 
 # COMMAND ----------
 
 # DBTITLE 1,CRIACAO DA TABELA SILVER - 202_bpa_dfp
 # Tabela Silver: BPA transformada (dados limpos e enriquecidos, particionada por ANO)
-spark.sql("""
-CREATE TABLE IF NOT EXISTS proj_cvm_02_silver.202_bpa_dfp (
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.202_bpa_dfp (
   CNPJ_CIA STRING,
   DT_REFER DATE,
   VERSAO INT,
@@ -342,7 +347,7 @@ PARTITIONED BY (ANO)
 COMMENT 'BPA transformado - Dados limpos, tipados e enriquecidos com colunas temporais. Particionada por ano para DELETE+APPEND incremental eficiente.'
 """)
 
-print("✅ Tabela proj_cvm_02_silver.202_bpa_dfp criada")
+print(f"✅ Tabela {SCHEMA_SILVER}.202_bpa_dfp criada")
 
 # COMMAND ----------
 
@@ -354,14 +359,14 @@ print("✅ Tabela proj_cvm_02_silver.202_bpa_dfp criada")
 # Alimentada pelo notebook 004_verificacao_diaria_landing e pelos notebooks bronze/silver
 
 # Schema de apoio (criado também no 002_ddl_controle_ingestao — idempotente)
-spark.sql("""
-CREATE SCHEMA IF NOT EXISTS proj_cvm_05_apoio
+spark.sql(f"""
+CREATE SCHEMA IF NOT EXISTS {SCHEMA_APOIO}
 COMMENT 'Schema para tabelas de apoio, controle e configuração do pipeline'
 """)
 
 # Tabela de observabilidade: maior que controle_ingestao (8 cols → 26 cols)
-spark.sql("""
-CREATE TABLE IF NOT EXISTS proj_cvm_05_apoio.observabilidade_execucoes (
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.observabilidade_execucoes (
   -- Identificação da execução
   id_execucao STRING COMMENT 'UUID único por execução de task',
   job_id BIGINT COMMENT 'ID do job no Databricks',
@@ -411,4 +416,27 @@ USING DELTA
 COMMENT 'Observabilidade - registra todas as execuções do pipeline CVM com métricas detalhadas de arquivos, dados e erros'
 """)
 
-print("✅ Tabela proj_cvm_05_apoio.observabilidade_execucoes criada")
+print(f"✅ Tabela {SCHEMA_APOIO}.observabilidade_execucoes criada")
+
+# ============================================================================
+# TABELA DE CONTROLE DE INGESTÃO
+# ============================================================================
+# Criada AQUI (não apenas no 002) para garantir que existe antes de qualquer
+# detecção. Schema novo sem controle_ingestao quebra na primeira execução
+# do orquestrador (get_novos_anos_para_processar faz SELECT nela).
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.controle_ingestao (
+  fonte STRING COMMENT 'Identificador da fonte de dados (ex: dre, bpa)',
+  ano INT COMMENT 'Ano fiscal do arquivo',
+  arquivo STRING COMMENT 'Nome do arquivo baixado',
+  last_modified_cvm TIMESTAMP COMMENT 'Data de última modificação do arquivo na CVM (header Last-Modified)',
+  versao_ingestao INT COMMENT 'Versão sequencial de ingestão',
+  ingest_ts TIMESTAMP COMMENT 'Timestamp da ingestão',
+  status STRING COMMENT 'Status da ingestão (SUCCESS, ERROR)',
+  mensagem STRING COMMENT 'Mensagem de erro ou observações'
+)
+USING DELTA
+COMMENT 'Controle de ingestão - Rastreia quando cada fonte/ano foi processado e detecta atualizações na CVM'
+""")
+
+print(f"✅ Tabela {SCHEMA_APOIO}.controle_ingestao criada")

@@ -7,7 +7,7 @@
 # MAGIC Fazer download dos arquivos ZIP de Demonstrações Financeiras Padronizadas (DFP) do portal CVM e armazená-los na Landing Zone em Unity Catalog Volume. Preserva arquivos originais e metadados HTTP para rastreabilidade e detecção de atualizações.
 # MAGIC
 # MAGIC ## Landing Zone
-# MAGIC * **Localização**: `/Volumes/main/proj_cvm/landing/dfp/`
+# MAGIC * **Localização**: definida por VOLUME_LANDING_DFP no config_parametros
 # MAGIC * **Estrutura**: Um subdiretório por ano (`/2023/`, `/2024/`, etc.)
 # MAGIC * **Conteúdo por ano**:
 # MAGIC   - `dfp_cia_aberta_YYYY.zip` - Arquivo original da CVM
@@ -58,7 +58,7 @@ else:
 # FALLBACK ROBUSTO: Se detecção falhou ou retornou vazio, usar anos recentes
 if not anos_detectados:
     ano_atual = datetime.now().year
-    anos_fallback = list(range(ano_atual - 5, ano_atual + 1))  # Últimos 5 anos + atual
+    anos_fallback = list(range(ANO_INICIAL_PROJETO, ano_atual + 1))
     print(f"\n⚠️  FALLBACK ATIVADO: Usando últimos 5 anos = {anos_fallback}")
     ANOS_PROCESSAR = anos_fallback
 else:
@@ -78,13 +78,13 @@ from datetime import datetime
 # Criar schema e volume UC se não existirem
 print(f"Verificando estrutura Unity Catalog...")
 
-# Criar schema proj_cvm
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG_NAME}.proj_cvm")
-print(f"✅ Schema: {CATALOG_NAME}.proj_cvm")
+# Criar schema {SCHEMA_VOLUME}
+spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG_NAME}.{SCHEMA_VOLUME}")
+print(f"✅ Schema: {CATALOG_NAME}.{SCHEMA_VOLUME}")
 
 # Criar volume landing
-spark.sql(f"CREATE VOLUME IF NOT EXISTS {CATALOG_NAME}.proj_cvm.landing")
-print(f"✅ Volume: {CATALOG_NAME}.proj_cvm.landing")
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {CATALOG_NAME}.{SCHEMA_VOLUME}.landing")
+print(f"✅ Volume: {CATALOG_NAME}.{SCHEMA_VOLUME}.landing")
 
 # Criar diretório base do Landing Zone se não existir
 print(f"\nCriando estrutura de Landing Zone...")

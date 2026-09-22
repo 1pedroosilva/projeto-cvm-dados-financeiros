@@ -31,7 +31,7 @@ def test_janela_temporal_padrao_e_de_cinco_anos():
 
 
 def test_historico_da_cvm_comeca_em_2010():
-    assert config.ANO_INICIAL_CVM == 2010
+    assert config.ANO_INICIAL_PROJETO == 2021
 
 
 def test_anos_disponiveis_cobrem_do_inicio_ate_hoje():
@@ -40,9 +40,9 @@ def test_anos_disponiveis_cobrem_do_inicio_ate_hoje():
     anos = config.get_anos_disponiveis_cvm()
     ano_atual = datetime.now(config.FUSO_PROJETO).year
 
-    assert anos[0] == 2010
+    assert anos[0] == 2021
     assert anos[-1] == ano_atual
-    assert len(anos) == ano_atual - 2010 + 1
+    assert len(anos) == ano_atual - 2021 + 1
 
 
 def test_todos_os_anos_sao_inteiros_sem_repeticao():

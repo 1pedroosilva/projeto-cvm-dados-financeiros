@@ -39,11 +39,11 @@
 # MAGIC **Rollup**: o valor do pai é a soma dos filhos diretos. Dashboards devem filtrar por `NIVEL_CONTA` para evitar double-counting (somar todos os registros soma pais + filhos, inflando o total).
 # MAGIC
 # MAGIC ## Entrada
-# MAGIC * **Tabela Bronze**: `proj_cvm_01_bronze.101_dre_dfp`
+# MAGIC * **Tabela Bronze**: definida por SCHEMA_BRONZE no config_parametros
 # MAGIC * Dados brutos conforme extraídos da CVM
 # MAGIC
 # MAGIC ## Saída
-# MAGIC * **Tabela Silver**: `proj_cvm_02_silver.201_dre_dfp`
+# MAGIC * **Tabela Silver**: definida por SCHEMA_SILVER no config_parametros
 # MAGIC * Dados limpos, padronizados e prontos para análise e agregações
 
 # COMMAND ----------
@@ -55,16 +55,8 @@
 
 # DBTITLE 1,Inicializar Anos a Processar
 # Captura explícita do retorno com guardrail de lista vazia
-# Para reprocessar todos os anos em desenvolvimento: widget MODO_DEV=true
-try:
-    MODO_DEV = dbutils.widgets.get('MODO_DEV').lower() == 'true'
-except Exception:
-    MODO_DEV = True
-
-if MODO_DEV:
-    ANOS_PROCESSAR = inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
-else:
-    ANOS_PROCESSAR = inicializar_anos_processar()
+# CARGA=completa força todos os anos
+ANOS_PROCESSAR = inicializar_anos_processar()
 
 if not ANOS_PROCESSAR:
     raise ValueError("❌ ANOS_PROCESSAR vazio - nenhum ano para processar")
@@ -103,7 +95,7 @@ for ano in ANOS_PROCESSAR:
     # Particiona por chave natural (CNPJ + DT_REFER + CD_CONTA + ORDEM_EXERC) e pega versão mais recente
     print("[1/4] Aplicando filtro de versionamento...")
 
-    df_bronze = spark.table("proj_cvm_01_bronze.101_dre_dfp") \
+    df_bronze = spark.table(f"{SCHEMA_BRONZE}.101_dre_dfp") \
         .filter(year(col("DT_REFER")) == ano)
 
     # GUARDRAIL: Verificar se Bronze tem dados reais para este ano
@@ -200,7 +192,7 @@ for ano in ANOS_PROCESSAR:
         .format("delta") \
         .mode("overwrite") \
         .option("replaceWhere", f"ANO = {ano}") \
-        .saveAsTable("proj_cvm_02_silver.201_dre_dfp")
+        .saveAsTable(f"{SCHEMA_SILVER}.201_dre_dfp")
 
     print(f"   ✓ Ano {ano} gravado com sucesso")
 
@@ -208,12 +200,12 @@ for ano in ANOS_PROCESSAR:
     print("[4/4] Registrando processamento...")
 
     spark.sql(f"""
-        INSERT INTO proj_cvm_05_apoio.controle_ingestao
+        INSERT INTO {SCHEMA_APOIO}.controle_ingestao
             (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
         VALUES (
             'dre_silver',
             {ano},
-            'proj_cvm_02_silver.201_dre_dfp',
+            '{SCHEMA_SILVER}.201_dre_dfp',
             NULL,
             1,
             current_timestamp(),

@@ -36,16 +36,8 @@
 
 # DBTITLE 1,Inicializar Anos a Processar
 # Captura explícita do retorno com guardrail de lista vazia
-# Para reprocessar todos os anos em desenvolvimento: widget MODO_DEV=true
-try:
-    MODO_DEV = dbutils.widgets.get('MODO_DEV').lower() == 'true'
-except Exception:
-    MODO_DEV = False
-
-if MODO_DEV:
-    ANOS_PROCESSAR = inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
-else:
-    ANOS_PROCESSAR = inicializar_anos_processar()
+# CARGA=completa força todos os anos
+ANOS_PROCESSAR = inicializar_anos_processar()
 
 if not ANOS_PROCESSAR:
     raise ValueError("❌ ANOS_PROCESSAR vazio - nenhum ano para processar")
@@ -109,7 +101,7 @@ for ano in ANOS_PROCESSAR:
         # IDEMPOTÊNCIA: Verificar se já processado
         ja_processado = spark.sql(f"""
             SELECT COUNT(*) as count
-            FROM proj_cvm_05_apoio.controle_ingestao
+            FROM {SCHEMA_APOIO}.controle_ingestao
             WHERE fonte = 'dre'
               AND ano = {ano}
               AND last_modified_cvm = '{last_modified_cvm}'
@@ -124,7 +116,7 @@ for ano in ANOS_PROCESSAR:
         # Buscar próxima versão de ingestão para este ano
         versao_atual = spark.sql(f"""
             SELECT COALESCE(MAX(_versao_ingestao), 0) + 1 as proxima_versao
-            FROM proj_cvm_01_bronze.101_dre_dfp
+            FROM {SCHEMA_BRONZE}.101_dre_dfp
             WHERE year(DT_REFER) = {ano}
         """).collect()[0]['proxima_versao']
         
@@ -198,14 +190,14 @@ for ano in ANOS_PROCESSAR:
     df_bronze.write \
         .format("delta") \
         .mode("append") \
-        .saveAsTable("proj_cvm_01_bronze.101_dre_dfp")
+        .saveAsTable(f"{SCHEMA_BRONZE}.101_dre_dfp")
 
     print(f"✓ Ano {ano} gravado com sucesso (versão {versao_atual})")
     anos_sucesso.append(ano)
 
     # Registrar ingestão na tabela de controle
     spark.sql(f"""
-        INSERT INTO proj_cvm_05_apoio.controle_ingestao
+        INSERT INTO {SCHEMA_APOIO}.controle_ingestao
             (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
         VALUES (
             'dre',

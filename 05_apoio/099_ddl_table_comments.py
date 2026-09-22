@@ -32,10 +32,15 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,CARREGAR CONFIG
+# MAGIC %run ./config_parametros
+
+# COMMAND ----------
+
 # DBTITLE 1,DOCUMENTAÇÃO DA TABELA BRONZE - 101_dre_dfp
 # Documentação da tabela bronze
-spark.sql("""
-COMMENT ON TABLE proj_cvm_01_bronze.101_dre_dfp IS 
+spark.sql(f"""
+COMMENT ON TABLE {SCHEMA_BRONZE}.101_dre_dfp IS 
 'Demonstração do Resultado do Exercício (DRE) - Dados brutos extraídos do portal de Dados Abertos da CVM. 
 Mantém a estrutura original dos arquivos DFP (Demonstrações Financeiras Padronizadas) publicados pelas companhias abertas brasileiras.
 Frequência: Anual | Fonte: Portal CVM | Processamento: APPEND incremental (com versionamento) | Metadados: _versao_ingestao, _last_modified_cvm, _ingest_ts, _source_file'
@@ -63,7 +68,7 @@ for col, desc in [
     ('_ingest_ts', 'Timestamp de ingestão dos dados (metadado técnico)'),
     ('_source_file', 'Nome do arquivo de origem da CVM (metadado técnico)')
 ]:
-    spark.sql(f"COMMENT ON COLUMN proj_cvm_01_bronze.101_dre_dfp.{col} IS '{desc}'")
+    spark.sql(f"COMMENT ON COLUMN {SCHEMA_BRONZE}.101_dre_dfp.{col} IS '{desc}'")
 
 print("✅ Tabela bronze documentada")
 
@@ -71,12 +76,12 @@ print("✅ Tabela bronze documentada")
 
 # DBTITLE 1,DOCUMENTAÇÃO DA TABELA SILVER - 201_dre_dfp
 # Documentação da tabela silver
-spark.sql("""
-COMMENT ON TABLE proj_cvm_02_silver.201_dre_dfp IS 
+spark.sql(f"""
+COMMENT ON TABLE {SCHEMA_SILVER}.201_dre_dfp IS 
 'Demonstração do Resultado do Exercício (DRE) - Dados transformados e enriquecidos. 
 Transformações aplicadas: (1) Conversão de tipos de dados, (2) Padronização de CNPJ, (3) Remoção de duplicados, 
 (4) Tratamento de nulls críticos, (5) Enriquecimento com colunas temporais (ANO, TRIMESTRE, MES). 
-Qualidade: Dados limpos e prontos para análise | Origem: proj_cvm_01_bronze.101_dre_dfp | Processamento: REPLACE WHERE (substituição atômica por período) | Particionamento: ANO'
+Qualidade: Dados limpos e prontos para análise | Origem: {SCHEMA_BRONZE}.101_dre_dfp | Processamento: REPLACE WHERE (substituição atômica por período) | Particionamento: ANO'
 """)
 
 # Documentação das colunas silver
@@ -100,7 +105,7 @@ for col, desc in [
     ('MES', 'Mês extraído de DT_REFER (tipo INT, valores: 1-12) - Facilita análises mensais'),
     ('DT_PROCESSAMENTO', 'Timestamp de processamento da transformação (tipo TIMESTAMP) - Rastreabilidade de quando o dado foi processado')
 ]:
-    spark.sql(f"COMMENT ON COLUMN proj_cvm_02_silver.201_dre_dfp.{col} IS '{desc}'")
+    spark.sql(f"COMMENT ON COLUMN {SCHEMA_SILVER}.201_dre_dfp.{col} IS '{desc}'")
 
 print("✅ Tabela silver documentada")
 
@@ -108,8 +113,8 @@ print("✅ Tabela silver documentada")
 
 # DBTITLE 1,DOCUMENTAÇÃO DA TABELA BRONZE - 102_bpa_dfp
 # Documentação da tabela bronze BPA
-spark.sql("""
-COMMENT ON TABLE proj_cvm_01_bronze.102_bpa_dfp IS 
+spark.sql(f"""
+COMMENT ON TABLE {SCHEMA_BRONZE}.102_bpa_dfp IS 
 'Balanço Patrimonial Ativo (BPA) - Dados brutos extraídos do portal de Dados Abertos da CVM. 
 Mantém a estrutura original dos arquivos DFP (Demonstrações Financeiras Padronizadas) publicados pelas companhias abertas brasileiras.
 Frequência: Anual | Fonte: Portal CVM | Processamento: APPEND incremental (com versionamento) | Metadados: _versao_ingestao, _last_modified_cvm, _ingest_ts, _source_file'
@@ -136,7 +141,7 @@ for col, desc in [
     ('_ingest_ts', 'Timestamp de ingestão dos dados (metadado técnico)'),
     ('_source_file', 'Nome do arquivo de origem da CVM (metadado técnico)')
 ]:
-    spark.sql(f"COMMENT ON COLUMN proj_cvm_01_bronze.102_bpa_dfp.{col} IS '{desc}'")
+    spark.sql(f"COMMENT ON COLUMN {SCHEMA_BRONZE}.102_bpa_dfp.{col} IS '{desc}'")
 
 print("✅ Tabela bronze 102_bpa_dfp documentada")
 
@@ -144,12 +149,12 @@ print("✅ Tabela bronze 102_bpa_dfp documentada")
 
 # DBTITLE 1,DOCUMENTAÇÃO DA TABELA SILVER - 202_bpa_dfp
 # Documentação da tabela silver BPA
-spark.sql("""
-COMMENT ON TABLE proj_cvm_02_silver.202_bpa_dfp IS 
+spark.sql(f"""
+COMMENT ON TABLE {SCHEMA_SILVER}.202_bpa_dfp IS 
 'Balanço Patrimonial Ativo (BPA) - Dados transformados e enriquecidos. 
 Transformações aplicadas: (1) Conversão de tipos de dados, (2) Padronização de CNPJ, (3) Remoção de duplicados, 
 (4) Tratamento de nulls críticos, (5) Enriquecimento com colunas temporais (ANO, TRIMESTRE, MES). 
-Qualidade: Dados limpos e prontos para análise | Origem: proj_cvm_01_bronze.102_bpa_dfp | Processamento: REPLACE WHERE (substituição atômica por período) | Particionamento: ANO'
+Qualidade: Dados limpos e prontos para análise | Origem: {SCHEMA_BRONZE}.102_bpa_dfp | Processamento: REPLACE WHERE (substituição atômica por período) | Particionamento: ANO'
 """)
 
 # Documentação das colunas silver BPA
@@ -172,7 +177,7 @@ for col, desc in [
     ('MES', 'Mês extraído de DT_REFER (tipo INT, valores: 1-12)'),
     ('DT_PROCESSAMENTO', 'Timestamp de processamento da transformação (tipo TIMESTAMP)')
 ]:
-    spark.sql(f"COMMENT ON COLUMN proj_cvm_02_silver.202_bpa_dfp.{col} IS '{desc}'")
+    spark.sql(f"COMMENT ON COLUMN {SCHEMA_SILVER}.202_bpa_dfp.{col} IS '{desc}'")
 
 print("✅ Tabela silver 202_bpa_dfp documentada")
 
@@ -180,8 +185,8 @@ print("✅ Tabela silver 202_bpa_dfp documentada")
 
 # DBTITLE 1,DOCUMENTAÇÃO DA TABELA BRONZE - 103_bpp_dfp
 # Documentação da tabela bronze BPP
-spark.sql("""
-COMMENT ON TABLE proj_cvm_01_bronze.103_bpp_dfp IS 
+spark.sql(f"""
+COMMENT ON TABLE {SCHEMA_BRONZE}.103_bpp_dfp IS 
 'Balanço Patrimonial Passivo (BPP) - Dados brutos extraídos do portal de Dados Abertos da CVM. 
 Mantém a estrutura original dos arquivos DFP (Demonstrações Financeiras Padronizadas) publicados pelas companhias abertas brasileiras.
 Frequência: Anual | Fonte: Portal CVM | Processamento: APPEND incremental (com versionamento) | Metadados: _versao_ingestao, _last_modified_cvm, _ingest_ts, _source_file'
@@ -208,7 +213,7 @@ for col, desc in [
     ('_ingest_ts', 'Timestamp de ingestão dos dados (metadado técnico)'),
     ('_source_file', 'Nome do arquivo de origem da CVM (metadado técnico)')
 ]:
-    spark.sql(f"COMMENT ON COLUMN proj_cvm_01_bronze.103_bpp_dfp.{col} IS '{desc}'")
+    spark.sql(f"COMMENT ON COLUMN {SCHEMA_BRONZE}.103_bpp_dfp.{col} IS '{desc}'")
 
 print("✅ Tabela bronze 103_bpp_dfp documentada")
 
@@ -216,12 +221,12 @@ print("✅ Tabela bronze 103_bpp_dfp documentada")
 
 # DBTITLE 1,DOCUMENTAÇÃO DA TABELA SILVER - 203_bpp_dfp
 # Documentação da tabela silver BPP
-spark.sql("""
-COMMENT ON TABLE proj_cvm_02_silver.203_bpp_dfp IS 
+spark.sql(f"""
+COMMENT ON TABLE {SCHEMA_SILVER}.203_bpp_dfp IS 
 'Balanço Patrimonial Passivo (BPP) - Dados transformados e enriquecidos. 
 Transformações aplicadas: (1) Conversão de tipos de dados, (2) Padronização de CNPJ, (3) Remoção de duplicados, 
 (4) Tratamento de nulls críticos, (5) Enriquecimento com colunas temporais (ANO, TRIMESTRE, MES). 
-Qualidade: Dados limpos e prontos para análise | Origem: proj_cvm_01_bronze.103_bpp_dfp | Processamento: REPLACE WHERE (substituição atômica por período) | Particionamento: ANO'
+Qualidade: Dados limpos e prontos para análise | Origem: {SCHEMA_BRONZE}.103_bpp_dfp | Processamento: REPLACE WHERE (substituição atômica por período) | Particionamento: ANO'
 """)
 
 # Documentação das colunas silver BPP
@@ -244,6 +249,6 @@ for col, desc in [
     ('MES', 'Mês extraído de DT_REFER (tipo INT, valores: 1-12)'),
     ('DT_PROCESSAMENTO', 'Timestamp de processamento da transformação (tipo TIMESTAMP)')
 ]:
-    spark.sql(f"COMMENT ON COLUMN proj_cvm_02_silver.203_bpp_dfp.{col} IS '{desc}'")
+    spark.sql(f"COMMENT ON COLUMN {SCHEMA_SILVER}.203_bpp_dfp.{col} IS '{desc}'")
 
 print("✅ Tabela silver 203_bpp_dfp documentada")

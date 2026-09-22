@@ -43,8 +43,8 @@ FUSO_PROJETO = ZoneInfo("America/Sao_Paulo")
 # Executado automaticamente via detecção inteligente
 # Pode ser sobrescrito via ANOS_OVERRIDE (veja final do arquivo)
 
-# Ano inicial disponível na CVM (histórico completo desde 2010)
-ANO_INICIAL_CVM = 2010
+# Ano inicial do projeto (janela começa em 2021, alinhado com a landing zone)
+ANO_INICIAL_PROJETO = 2021
 
 # Janela temporal relevante: quantos anos para trás processar a partir do ano atual
 # Controla a inteligência temporal do orquestrador automático
@@ -69,17 +69,192 @@ TIPOS_DFP = {
 }
 
 # ============================================================================
-# UNITY CATALOG - SCHEMAS E VOLUMES
+# AMBIENTES.JSON — FONTE ÚNICA DE CONFIGURAÇÃO
 # ============================================================================
+# config_parametros.py lê ambientes.json em tempo de execução e deriva
+# dele todos os nomes de catálogo, schema, tabela e volume.
+# Nenhum outro notebook monta nome por conta própria.
+# Eixos independentes: AMBIENTE (dev/test/prod) e CARGA (incremental/completa).
 
-SCHEMA_BRONZE = "proj_cvm_01_bronze"
-SCHEMA_SILVER = "proj_cvm_02_silver"
-SCHEMA_GOLD = "proj_cvm_03_gold"
-CATALOG_NAME = "workspace"
-VOLUME_LANDING = f"/Volumes/{CATALOG_NAME}/proj_cvm/landing"
+
+def _encontrar_ambientes_json() -> str:
+    """Encontra ambientes.json relativo ao notebook em execução.
+
+    O config é carregado via %run e roda em dois contextos:
+    - Git folder: /Workspace/Users/.../projeto-cvm-dados-financeiros/05_apoio/
+    - Bundle deploy: /Workspace/Users/.../.bundle/.../files/05_apoio/
+
+    Em ambos, a estrutura de diretórios é a mesma: 05_apoio/ é subdiretório
+    da raiz do projeto. A estratégia é obter o caminho do notebook chamador
+    via dbutils.notebook.getContext() e subir até encontrar 05_apoio/ambientes.json.
+    """
+    import os
+
+    # Estratégia 1: dbutils.notebook.getContext().notebookPath()
+    # Disponível em notebook job tasks (não em Spark Connect puro).
+    try:
+        nb_path = str(dbutils.notebook.getContext().notebookPath())
+        fs_path = f"/Workspace{nb_path}" if not nb_path.startswith("/Workspace") else nb_path
+        nb_dir = os.path.dirname(fs_path)
+
+        current = nb_dir
+        for _ in range(6):
+            for candidate in [
+                os.path.join(current, "ambientes.json"),
+                os.path.join(current, "05_apoio", "ambientes.json"),
+            ]:
+                if os.path.exists(candidate):
+                    return candidate
+            current = os.path.dirname(current)
+    except (AttributeError, Exception):
+        pass
+
+    # Estratégia 2 (fallback): buscar em /Workspace/Users/*/projeto-cvm-dados-financeiros/
+    users_dir = "/Workspace/Users"
+    if os.path.exists(users_dir):
+        for user_dir in os.listdir(users_dir):
+            candidate = os.path.join(
+                users_dir, user_dir,
+                "projeto-cvm-dados-financeiros", "05_apoio", "ambientes.json",
+            )
+            if os.path.exists(candidate):
+                return candidate
+            # Também procurar em .bundle/<target>/files/
+            bundle_base = os.path.join(
+                users_dir, user_dir,
+                ".bundle", "projeto-cvm-dados-financeiros",
+            )
+            if os.path.isdir(bundle_base):
+                for target in os.listdir(bundle_base):
+                    candidate = os.path.join(
+                        bundle_base, target, "files", "05_apoio", "ambientes.json",
+                    )
+                    if os.path.exists(candidate):
+                        return candidate
+
+    raise FileNotFoundError(
+        "ambientes.json não encontrado em 05_apoio/. "
+        "Verifique se o arquivo existe no projeto e foi incluído no bundle deploy."
+    )
+
+
+def _resolver_parametro(nome: str, config_json: dict, secao: str) -> str:
+    """Lê um parâmetro do JSON respeitando a precedência: widget > env > padrão."""
+    precedencia = config_json[secao]["precedencia"]
+    padrao = config_json[secao]["padrao"]
+
+    for origem in precedencia:
+        if origem.startswith("widget:"):
+            widget_name = origem.split(":")[1]
+            try:
+                val = dbutils.widgets.get(widget_name).strip()
+                if val:
+                    return val
+            except Exception:
+                pass
+        elif origem.startswith("variavel_ambiente:"):
+            env_name = origem.split(":")[1]
+            val = os.getenv(env_name, "").strip()
+            if val:
+                return val
+        elif origem == "padrao":
+            return padrao
+
+    return padrao
+
+
+def _carregar_config_ambiente() -> dict:
+    """Carrega ambientes.json, resolve AMBIENTE e CARGA, deriva todas as variáveis.
+
+    Returns:
+        dict com catalogo, schemas, tabelas, volumes, ambiente, carga.
+
+    Raises:
+        ValueError: ambiente inválido ou declarado mas não instanciado.
+    """
+    json_path = _encontrar_ambientes_json()
+    with open(json_path, "r", encoding="utf-8") as f:
+        config_json = json.load(f)
+
+    # Resolver eixos independentes
+    ambiente = _resolver_parametro("AMBIENTE", config_json, "ambiente")
+    carga = _resolver_parametro("CARGA", config_json, "carga")
+
+    # Validar ambiente
+    valores_aceitos = config_json["ambiente"]["valores_aceitos"]
+    if ambiente not in valores_aceitos:
+        raise ValueError(
+            f"AMBIENTE='{ambiente}' inválido. Valores aceitos: {valores_aceitos}."
+        )
+
+    ambientes_def = config_json["ambientes"]
+    if ambiente not in ambientes_def:
+        raise ValueError(
+            f"AMBIENTE='{ambiente}' não está declarado em ambientes.json."
+        )
+
+    amb_config = ambientes_def[ambiente]
+    if not amb_config.get("existe", False):
+        raise ValueError(
+            f"AMBIENTE='{ambiente}' está declarado em ambientes.json mas não instanciado "
+            f"(existe=false). {amb_config.get('_nota', '')}"
+        )
+
+    # Validar carga
+    cargas_aceitas = config_json["carga"]["valores_aceitos"]
+    if carga not in cargas_aceitas:
+        raise ValueError(
+            f"CARGA='{carga}' inválida. Valores aceitos: {cargas_aceitas}."
+        )
+
+    # Derivar nomes a partir do JSON
+    catalogo = amb_config["catalogo"]
+    prefixo = amb_config["prefixo"]
+    camadas = config_json["camadas"]
+
+    def _compor_schema(camada: str) -> str:
+        return f"{prefixo}_{camadas[camada]}_{camada}"
+
+    schemas = {camada: _compor_schema(camada) for camada in camadas}
+
+    # Volume da Landing Zone (schema próprio, sem ordem nem camada)
+    vol_config = config_json["volume"]
+    volume_landing = vol_config["caminho"].format(
+        catalogo=catalogo,
+        schema=vol_config["schema"],
+        nome=vol_config["nome"],
+    )
+
+    return {
+        "catalogo": catalogo,
+        "schemas": schemas,
+        "volume_landing": volume_landing,
+        "volume_schema": vol_config["schema"],
+        "ambiente": ambiente,
+        "carga": carga,
+    }
+
+
+# Carregar config e derivar variáveis globais
+_config_amb = _carregar_config_ambiente()
+
+CATALOG_NAME = _config_amb["catalogo"]
+SCHEMA_BRONZE = _config_amb["schemas"]["bronze"]
+SCHEMA_SILVER = _config_amb["schemas"]["silver"]
+SCHEMA_GOLD = _config_amb["schemas"]["gold"]
+SCHEMA_APOIO = _config_amb["schemas"]["apoio"]
+TABELA_CONTROLE = f"{CATALOG_NAME}.{SCHEMA_APOIO}.controle_ingestao"
+VOLUME_LANDING = _config_amb["volume_landing"]
 VOLUME_LANDING_DFP = f"{VOLUME_LANDING}/dfp"
-SCHEMA_APOIO = "proj_cvm_05_apoio"
-TABELA_CONTROLE = f"{SCHEMA_APOIO}.controle_ingestao"
+SCHEMA_VOLUME = _config_amb["volume_schema"]
+AMBIENTE = _config_amb["ambiente"]
+CARGA = _config_amb["carga"]
+
+print(f"🏗️  AMBIENTE={AMBIENTE}, CARGA={CARGA}")
+print(f"📋 Catalogo={CATALOG_NAME}")
+print(f"📋 Bronze={SCHEMA_BRONZE}, Silver={SCHEMA_SILVER}, "
+      f"Gold={SCHEMA_GOLD}, Apoio={SCHEMA_APOIO}")
+print(f"📋 Volume Landing={VOLUME_LANDING}")
 
 # Mapeamento fonte → tabela destino (para verificação de dados reais)
 # Permite que a detecção verifique se dados existem fisicamente na tabela,
@@ -103,9 +278,9 @@ def get_url_arquivo_cvm(ano: int) -> str:
 
 
 def get_anos_disponiveis_cvm() -> list:
-    """Retorna anos disponíveis na CVM (2010 até ano corrente)."""
+    """Retorna anos disponíveis no projeto (2021 até ano corrente)."""
     ano_atual = datetime.now(FUSO_PROJETO).year
-    return list(range(ANO_INICIAL_CVM, ano_atual + 1))
+    return list(range(ANO_INICIAL_PROJETO, ano_atual + 1))
 
 
 def get_novos_anos_para_processar(fonte: str, tabela_controle: str = TABELA_CONTROLE) -> list:
@@ -408,21 +583,13 @@ def inicializar_anos_processar(force_anos: list = None, silent: bool = False) ->
     # PRIORIDADE 2: Variável de ambiente
     anos_override_env = os.getenv('ANOS_OVERRIDE', '').strip()
 
-    # PRIORIDADE 3: Widget SCHEMA_SUFFIX (para schemas de teste)
-    try:
-        schema_suffix = dbutils.widgets.get('SCHEMA_SUFFIX').strip()
-        if schema_suffix:
-            global SCHEMA_BRONZE, SCHEMA_SILVER, SCHEMA_GOLD
-            SCHEMA_BRONZE = f"bronze_cvm_dfp{schema_suffix}"
-            SCHEMA_SILVER = f"silver_cvm_dfp{schema_suffix}"
-            SCHEMA_GOLD = f"gold_cvm_dfp{schema_suffix}"
-            if not silent:
-                print(f"🧪 Schemas de teste: BRONZE={SCHEMA_BRONZE}, SILVER={SCHEMA_SILVER}")
-    except Exception:
-        pass  # Widget não existe, usar schemas produção
-
     # Consolidar ANOS_OVERRIDE (widget tem prioridade sobre env)
     anos_override = anos_override_widget or anos_override_env
+
+    # CARGA=completa: força todos os anos disponíveis
+    # Só aplica se não houver override explícito via force_anos ou ANOS_OVERRIDE
+    if CARGA == "completa" and force_anos is None and not anos_override:
+        force_anos = get_anos_disponiveis_cvm()
 
     if force_anos:
         # Override via parâmetro

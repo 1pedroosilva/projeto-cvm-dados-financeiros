@@ -11,7 +11,7 @@
 # MAGIC Verificar se há novas versões dos arquivos ZIP de DFP da CVM e baixá-las para a Landing Zone, arquivando versões anteriores antes de sobrescrever.
 # MAGIC
 # MAGIC ## Landing Zone
-# MAGIC * **Localização**: `/Volumes/workspace/proj_cvm/landing/dfp/`
+# MAGIC * **Localização**: definida por VOLUME_LANDING_DFP no config_parametros
 # MAGIC * **Estrutura**: Um subdiretório por ano (`/2023/`, `/2024/`, etc.)
 # MAGIC * **Conteúdo por ano**:
 # MAGIC   - `dfp_cia_aberta_YYYY.zip` - Versão mais recente do arquivo original da CVM
@@ -316,7 +316,7 @@ id_exec = str(uuid.uuid4())
 notebook_path = '/Workspace/Users/1pedro.osilva@gmail.com/projeto-cvm-dados-financeiros/05_apoio/004_verificacao_diaria_landing'
 
 spark.sql(f"""
-    INSERT INTO workspace.proj_cvm_05_apoio.observabilidade_execucoes
+    INSERT INTO {CATALOG_NAME}.{SCHEMA_APOIO}.observabilidade_execucoes
         (id_execucao, job_id, run_id, task_key, notebook_path,
          etapa, fonte, status,
          arquivos_verificados, arquivos_baixados, arquivos_arquivados, arquivos_ignorados,

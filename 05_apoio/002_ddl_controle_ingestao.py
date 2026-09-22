@@ -21,6 +21,11 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,CARREGAR CONFIG
+# MAGIC %run ./config_parametros
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Criação da Tabela
 
@@ -28,17 +33,17 @@
 
 # DBTITLE 1,CRIAÇÃO DA TABELA DE CONTROLE
 # CRIAÇÃO DO SCHEMA DE APOIO
-spark.sql("""
-CREATE SCHEMA IF NOT EXISTS proj_cvm_05_apoio
+spark.sql(f"""
+CREATE SCHEMA IF NOT EXISTS {SCHEMA_APOIO}
 COMMENT 'Schema para tabelas de apoio, controle e configuração do pipeline'
 """)
 
-print("✅ Schema proj_cvm_05_apoio criado")
+print(f"✅ Schema {SCHEMA_APOIO} criado")
 
 # CRIAÇÃO DA TABELA DE CONTROLE
 # Tabela registra metadados de cada execução do pipeline
-spark.sql("""
-CREATE TABLE IF NOT EXISTS proj_cvm_05_apoio.controle_ingestao (
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.controle_ingestao (
   fonte STRING COMMENT 'Identificador da fonte de dados (ex: dre, bpa)',
   ano INT COMMENT 'Ano fiscal do arquivo',
   arquivo STRING COMMENT 'Nome do arquivo baixado',
@@ -52,7 +57,7 @@ USING DELTA
 COMMENT 'Controle de ingestão - Rastreia quando cada fonte/ano foi processado e detecta atualizações na CVM'
 """)
 
-print("✅ Tabela proj_cvm_05_apoio.controle_ingestao criada com sucesso")
+print(f"✅ Tabela {SCHEMA_APOIO}.controle_ingestao criada com sucesso")
 
 # COMMAND ----------
 
@@ -64,10 +69,10 @@ print("✅ Tabela proj_cvm_05_apoio.controle_ingestao criada com sucesso")
 # DBTITLE 1,VALIDAÇÃO DA ESTRUTURA
 # VALIDAÇÃO DA ESTRUTURA
 # Exibe schema da tabela criada para confirmar estrutura
-display(spark.table("proj_cvm_05_apoio.controle_ingestao").limit(0))
+display(spark.table(f"{SCHEMA_APOIO}.controle_ingestao").limit(0))
 
 # COMMAND ----------
 
 # DBTITLE 1,DESCRIBE da tabela
 # DESCRIBE da tabela para ver tipos e comentários
-spark.sql("DESCRIBE TABLE proj_cvm_05_apoio.controle_ingestao").show(truncate=False)
+spark.sql(f"DESCRIBE TABLE {SCHEMA_APOIO}.controle_ingestao").show(truncate=False)
