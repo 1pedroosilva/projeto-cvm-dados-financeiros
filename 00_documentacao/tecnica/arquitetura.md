@@ -22,8 +22,8 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
   - Histórico completo (append-only quando possível)
   - Rastreabilidade total da origem
 * **Formato**: Delta Lake
-* **Schema**: `workspace.bronze`
-* **Numeração**: Notebooks `1XX_` e tabelas `workspace.bronze.1XX_`
+* **Schema**: `{SCHEMA_BRONZE}`
+* **Numeração**: Notebooks `1XX_` e tabelas `{SCHEMA_BRONZE}.1XX_`
 * **Retenção**: Longo prazo (dados origem preservados)
 
 #### Camada Silver (02_silver/)
@@ -35,8 +35,8 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
   - Padronização de nomenclaturas
   - Enriquecimento com dados de referência
 * **Formato**: Delta Lake
-* **Schema**: `workspace.silver`
-* **Numeração**: Notebooks `2XX_` e tabelas `workspace.silver.2XX_`
+* **Schema**: `{SCHEMA_SILVER}`
+* **Numeração**: Notebooks `2XX_` e tabelas `{SCHEMA_SILVER}.2XX_`
 * **Retenção**: Médio/longo prazo
 
 #### Camada Gold (03_gold/)
@@ -47,8 +47,8 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
   - Desnormalização para performance
   - KPIs e indicadores de negócio
 * **Formato**: Delta Lake
-* **Schema**: `workspace.gold`
-* **Numeração**: Notebooks `3XX_` e tabelas `workspace.gold.3XX_`
+* **Schema**: `{SCHEMA_GOLD}`
+* **Numeração**: Notebooks `3XX_` e tabelas `{SCHEMA_GOLD}.3XX_`
 * **Retenção**: Conforme necessidade de negócio
 
 ## Stack Tecnológico
@@ -82,7 +82,7 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 
 **Objetivo**: Preservar arquivos originais da fonte sem alteração
 
-**Localização**: Unity Catalog Volume `/Volumes/workspace/proj_cvm/landing/dfp/{ano}/`
+**Localização**: Unity Catalog Volume `{VOLUME_LANDING_DFP}/{ano}/`
 
 **Pipeline**:
 1. **Download** via `003_download_cvm_para_landing.py`
@@ -97,11 +97,11 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
    - `last_modified` (timestamp HTTP)
    - `content_length` (tamanho do arquivo)
    - `download_timestamp` (quando foi baixado)
-3. **Rastreamento** em tabela de controle `proj_cvm_05_apoio.controle_ingestao`
+3. **Rastreamento** em tabela de controle `{SCHEMA_APOIO}.controle_ingestao`
 
 **Estrutura**:
 ```
-/Volumes/workspace/proj_cvm/landing/dfp/
+{VOLUME_LANDING_DFP}/
 ├── 2020/
 │   ├── dfp_cia_aberta_2020.zip
 │   └── _metadata.json
@@ -122,9 +122,9 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 **Objetivo**: Captura bruta com histórico completo (APPEND-ONLY)
 
 **Notebooks**:
-* `101_cvm_dfp_dre.py` → Tabela `proj_cvm_01_bronze.101_dre_dfp`
-* `102_cvm_dfp_bpa.py` → Tabela `proj_cvm_01_bronze.102_bpa_dfp`
-* `103_cvm_dfp_bpp.py` → Tabela `proj_cvm_01_bronze.103_bpp_dfp`
+* `101_cvm_dfp_dre.py` → Tabela `{SCHEMA_BRONZE}.101_dre_dfp`
+* `102_cvm_dfp_bpa.py` → Tabela `{SCHEMA_BRONZE}.102_bpa_dfp`
+* `103_cvm_dfp_bpp.py` → Tabela `{SCHEMA_BRONZE}.103_bpp_dfp`
 
 **Pipeline**:
 1. **Leitura** do ZIP na Landing Zone
@@ -143,7 +143,7 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
    ```
 4. **Gravação**: `APPEND-ONLY` (histórico completo)
    ```python
-   df_bronze.write.mode("append").saveAsTable("proj_cvm_01_bronze.101_dre_dfp")
+   df_bronze.write.mode("append").saveAsTable("{SCHEMA_BRONZE}.101_dre_dfp")
    ```
    - Preserva histórico de versões (múltiplas execuções = múltiplas versões)
    - Silver aplica Window Function para selecionar versão mais recente
@@ -166,14 +166,14 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 **Objetivo**: Dados limpos, validados e prontos para análise
 
 **Notebooks**:
-* `201_cvm_dfp_dre.py` → Tabela `proj_cvm_02_silver.201_dre_dfp`
-* `202_cvm_dfp_bpa.py` → Tabela `proj_cvm_02_silver.202_bpa_dfp`
-* `203_cvm_dfp_bpp.py` → Tabela `proj_cvm_02_silver.203_bpp_dfp`
+* `201_cvm_dfp_dre.py` → Tabela `{SCHEMA_SILVER}.201_dre_dfp`
+* `202_cvm_dfp_bpa.py` → Tabela `{SCHEMA_SILVER}.202_bpa_dfp`
+* `203_cvm_dfp_bpp.py` → Tabela `{SCHEMA_SILVER}.203_bpp_dfp`
 
 **Pipeline**:
 1. **Leitura da Bronze com Window Function** (filtro de versão mais recente via `_versao_ingestao`)
    ```python
-   df_bronze = spark.table("proj_cvm_01_bronze.101_dre_dfp").filter(year(col("DT_REFER")) == ano)
+   df_bronze = spark.table("{SCHEMA_BRONZE}.101_dre_dfp").filter(year(col("DT_REFER")) == ano)
    ```
 2. **Transformações**:
    - Conversão de tipos (`DT_REFER` → date, `VL_CONTA` → double)
@@ -228,7 +228,7 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 >
 > **004_verificacao_diaria_landing**: Itera a janela temporal diretamente (`range(ano_atual - JANELA_ANOS_RELEVANTE, ano_atual + 1)`), sem depender de `inicializar_anos_processar()`. Esta independência é intencional: o notebook que descobre mudanças na fonte não pode receber a lista de quem já assumiu que nada mudou.
 
-**Tabela de Controle**: `proj_cvm_05_apoio.controle_ingestao`
+**Tabela de Controle**: `{SCHEMA_APOIO}.controle_ingestao`
 * Rastreia cada ingestão (ano, timestamp, versão)
 * Detecta mudanças via `last_modified`
 * Evita reprocessamento desnecessário
@@ -255,31 +255,25 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 %run ./config_parametros  # Notebook em 05_apoio/
 
 # Célula 3: Inicializar Anos a Processar
-# Widget MODO_DEV: False por default (job/produção). True via widget UI para reprocessar todos os anos.
-try:
-    MODO_DEV = dbutils.widgets.get('MODO_DEV').lower() == 'true'
-except Exception:
-    MODO_DEV = False
-
-if MODO_DEV:
-    ANOS_PROCESSAR = inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
-else:
-    ANOS_PROCESSAR = inicializar_anos_processar()
+# CARGA (do config_parametros) controla a janela de anos:
+#   incremental (padrão): detecção inteligente via controle_ingestao
+#   completa: força todos os anos disponíveis (2021-ano corrente)
+ANOS_PROCESSAR = inicializar_anos_processar()
 ```
 
 **Função `inicializar_anos_processar()`**:
 
 * **Detecção inteligente**: Consulta tabela de controle (`controle_ingestao`) para detectar anos com arquivos baixados
-* **Override opcional**: Aceita argumento `force_anos` ou variável de ambiente `ANOS_PROCESSAR_OVERRIDE`
+* **Override opcional**: Aceita argumento `force_anos` (uso interno) ou variável de ambiente `CARGA=completa` para forçar todos os anos
 * **Silent mode**: Parâmetro `silent=True` suprime saída (usar em jobs automáticos)
 * **Idempotente**: Pode ser chamada múltiplas vezes sem efeito colateral
 
 **Exemplo de override**:
 ```python
-# Reprocessar todos os anos disponíveis (desenvolvimento)
-# Via widget UI: criar widget MODO_DEV com valor "true"
-# Ou via código:
-inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
+# Reprocessar todos os anos: CARGA=completa
+# Via widget UI: criar widget CARGA com valor "completa"
+# Ou via variável de ambiente: export CARGA=completa
+# O eixo CARGA e resolvido no config_parametros via ambientes.json
 ```
 
 **Benefícios**:
@@ -294,7 +288,7 @@ inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
 
 ### Infraestrutura
 
-**Landing Zone** (`/Volumes/workspace/proj_cvm/landing/dfp/`):
+**Landing Zone** (`{VOLUME_LANDING_DFP}`):
 * Preservação de arquivos originais da CVM
 * Metadados HTTP (`_metadata.json` por ano)
 * Versionamento automático de arquivos atualizados
@@ -313,15 +307,15 @@ inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
 
 | Notebook | Tabela UC | Demonstração |
 | --- | --- | --- |
-| `101_cvm_dfp_dre.py` | `proj_cvm_01_bronze.101_dre_dfp` | DRE (Resultado do Exercício) |
-| `102_cvm_dfp_bpa.py` | `proj_cvm_01_bronze.102_bpa_dfp` | BPA (Balanço Patrimonial Ativo) |
-| `103_cvm_dfp_bpp.py` | `proj_cvm_01_bronze.103_bpp_dfp` | BPP (Balanço Patrimonial Passivo) |
+| `101_cvm_dfp_dre.py` | `{SCHEMA_BRONZE}.101_dre_dfp` | DRE (Resultado do Exercício) |
+| `102_cvm_dfp_bpa.py` | `{SCHEMA_BRONZE}.102_bpa_dfp` | BPA (Balanço Patrimonial Ativo) |
+| `103_cvm_dfp_bpp.py` | `{SCHEMA_BRONZE}.103_bpp_dfp` | BPP (Balanço Patrimonial Passivo) |
 
 **Características Técnicas:**
-* **Origem**: Leitura de Landing Zone (`/Volumes/workspace/proj_cvm/landing/dfp/{ano}/`)
+* **Origem**: Leitura de Landing Zone (`{VOLUME_LANDING_DFP}/{ano}/`)
 * **Versionamento**: Colunas `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts`
 * **Estratégia**: APPEND-ONLY (histórico completo preservado)
-* **Controle**: Registro em `proj_cvm_05_apoio.controle_ingestao`
+* **Controle**: Registro em `{SCHEMA_APOIO}.controle_ingestao`
 * **Idempotência**: Mesma versão de arquivo gera mesma versão de dados
 
 ### Camada Silver
@@ -330,9 +324,9 @@ inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())
 
 | Notebook | Tabela UC | Demonstração |
 | --- | --- | --- |
-| `201_cvm_dfp_dre.py` | `proj_cvm_02_silver.201_dre_dfp` | DRE transformada |
-| `202_cvm_dfp_bpa.py` | `proj_cvm_02_silver.202_bpa_dfp` | BPA transformada |
-| `203_cvm_dfp_bpp.py` | `proj_cvm_02_silver.203_bpp_dfp` | BPP transformada |
+| `201_cvm_dfp_dre.py` | `{SCHEMA_SILVER}.201_dre_dfp` | DRE transformada |
+| `202_cvm_dfp_bpa.py` | `{SCHEMA_SILVER}.202_bpa_dfp` | BPA transformada |
+| `203_cvm_dfp_bpp.py` | `{SCHEMA_SILVER}.203_bpp_dfp` | BPP transformada |
 
 **Características Técnicas:**
 * **Filtro de versão**: Window Function (ROW_NUMBER) para selecionar versão mais recente
@@ -387,13 +381,13 @@ with open('/Workspace/Users/<user-email>/.../config_parametros.py', 'r') as f:
   ```python
   # ✅ Correto (Spark Connect/Serverless)
   import os
-  os.makedirs("/Volumes/workspace/proj_cvm/landing/dfp/2025", exist_ok=True)
+  os.makedirs(f"{VOLUME_LANDING_DFP}/2025", exist_ok=True)
   ```
 
 * **Leitura/escrita de arquivos**: Python built-in (`open()`) com path `/Volumes/`
   ```python
   # ✅ Correto (Spark Connect/Serverless)
-  with open("/Volumes/workspace/proj_cvm/landing/dfp/2025/dados.zip", "wb") as f:
+  with open(f"{VOLUME_LANDING_DFP}/2025/dados.zip", "wb") as f:
       f.write(conteudo)
   ```
 
@@ -401,7 +395,7 @@ with open('/Workspace/Users/<user-email>/.../config_parametros.py', 'r') as f:
   ```python
   # ✅ Correto (Spark Connect/Serverless)
   import os
-  for arquivo in os.listdir("/Volumes/workspace/proj_cvm/landing/dfp/2025"):
+  for arquivo in os.listdir(f"{VOLUME_LANDING_DFP}/2025"):
       print(arquivo)
   ```
 
@@ -459,9 +453,9 @@ def apply_schema_migration_if_needed():
     - 001 (31/07/2026): Correção tipos STRING → INT/TIMESTAMP
     """
     migrations = [
-        ("proj_cvm_05_apoio.controle_ingestao", "last_modified_cvm", "TIMESTAMP"),
-        ("proj_cvm_02_silver.201_dre_dfp", "VERSAO", "INT"),
-        ("proj_cvm_02_silver.201_dre_dfp", "CD_CVM", "INT"),
+        ("{SCHEMA_APOIO}.controle_ingestao", "last_modified_cvm", "TIMESTAMP"),
+        ("{SCHEMA_SILVER}.201_dre_dfp", "VERSAO", "INT"),
+        ("{SCHEMA_SILVER}.201_dre_dfp", "CD_CVM", "INT"),
         # ...
     ]
     
@@ -530,11 +524,11 @@ def apply_schema_migration_if_needed():
   - Capacidade adequada (99 notebooks por camada)
 
 #### Tabelas Unity Catalog
-* **Formato**: `workspace.[camada].[XXX]_[nome_tabela]`
+* **Formato**: `{SCHEMA_[CAMADA]}.[XXX]_[nome_tabela]` (prefixo derivado do ambiente via config_parametros)
 * **Exemplos**:
-  - `workspace.bronze.101_dre_consolidada`
-  - `workspace.silver.201_dre_limpa`
-  - `workspace.gold.301_indicadores_empresas`
+  - `{SCHEMA_BRONZE}.101_dre_dfp`
+  - `{SCHEMA_SILVER}.201_dre_dfp`
+  - `{SCHEMA_GOLD}.301_indicadores_empresas`
 * **Regra**: Numeração da tabela segue o notebook que a cria
 
 ### Princípio DRY em Nomenclatura
@@ -584,9 +578,9 @@ df_resultado = spark.sql("""
 ### Governança
 
 * **Schemas Unity Catalog**:
-  - `workspace.bronze` - Dados brutos
-  - `workspace.silver` - Dados transformados
-  - `workspace.gold` - Dados agregados
+  - `{SCHEMA_BRONZE}` - Dados brutos
+  - `{SCHEMA_SILVER}` - Dados transformados
+  - `{SCHEMA_GOLD}` - Dados agregados
 * **Controle de versão**: Git (apenas código consolidado)
 * **Documentação**: Arquivos Markdown no próprio projeto
 
@@ -600,7 +594,7 @@ df_resultado = spark.sql("""
 * Retry logic com exponential backoff para chamadas HTTP/APIs
 * Tratamento granular de erros (try/except por unidade de trabalho)
 * Logging estruturado (timestamp, contexto, status)
-* Checkpointing via tabela de controle (`proj_cvm_05_apoio.controle_ingestao`)
+* Checkpointing via tabela de controle (`{SCHEMA_APOIO}.controle_ingestao`)
 * Validação de pré-requisitos antes de processar
 * Auto-ajuste de períodos (detecção inteligente de pendentes)
 * Parametrização externa (config em arquivos Python)
@@ -627,6 +621,8 @@ df_resultado = spark.sql("""
 
 ## Deploy e Infraestrutura
 
+> **[SUPERSEDED em 19/09/2026 — orquestrador removido do job; ver seção Orquestração]**
+
 O pipeline é implantado via **Databricks Asset Bundles (DABs)**, definido em `databricks.yml` (raiz do projeto) e `resources/jobs/job_pipeline_cvm.yml`. O Job `Pipeline CVM - DFP` (id `661897477878521`), originalmente criado manualmente na UI, foi adotado pelo bundle via `databricks bundle deployment bind` — não foi recriado, preservando histórico de execuções.
 
 **Características do deploy gerenciado por bundle:**
@@ -635,12 +631,27 @@ O pipeline é implantado via **Databricks Asset Bundles (DABs)**, definido em `d
 * **Compute serverless obrigatório**: o workspace não suporta cluster clássico (`new_cluster`); as tasks do job rodam sem especificação de cluster
 * **Modo `development`**: o target `dev` prefixa o nome do job com `[dev <usuario>]` automaticamente
 
-**Targets configurados**: `dev` (padrão, schema `proj_cvm_dev`) e `prod` (schema `proj_cvm`), ambos no mesmo workspace.
+**Targets declarados**: `dev` (padrão, prefixo `proj_cvm_dev`, único instanciado), `test` (prefixo `proj_cvm_test`, não instanciado) e `prod` (prefixo `proj_cvm_prod`, não instanciado), todos no mesmo workspace.
+
+## Parametrizacao de Ambiente
+
+Todos os nomes de catalogo, schema, tabela e volume sao derivados de `ambientes.json` via `config_parametros`. Nenhum notebook monta nome por conta propria.
+
+**Fonte unica**: `05_apoio/ambientes.json` define catalogo, prefixo de schema por ambiente, camadas (bronze/silver/gold/apoio) e schema do volume. O `config_parametros` le o JSON em tempo de execucao e deriva:
+* `CATALOG_NAME`, `SCHEMA_BRONZE`, `SCHEMA_SILVER`, `SCHEMA_GOLD`, `SCHEMA_APOIO`
+* `SCHEMA_VOLUME` (schema do volume da landing zone, compartilhado entre ambientes)
+* `VOLUME_LANDING`, `VOLUME_LANDING_DFP`
+* `TABELA_CONTROLE` (catalogo.schema.controle_ingestao)
+* `AMBIENTE`, `CARGA` (eixos independentes: ambiente e tipo de carga)
+
+**Eixos independentes**:
+* `AMBIENTE` (dev/test/prod): define catalogo e prefixo de schema
+* `CARGA` (incremental/completa): controla a janela de anos processada
+
+**DDL unificado**: O notebook `001_ddl_create_tables.py` cria todos os schemas e tabelas do projeto em uma unica passagem idempotente, incluindo `controle_ingestao`. Antes, essa tabela era criada apenas no `002_ddl_controle_ingestao.py`; sem ela, a primeira execucao do orquestrador em schema novo quebrava (`get_novos_anos_para_processar` faz SELECT na tabela). O 002 permanece como validacao idempotente.
 
 ## Próximas Evoluções Técnicas
 
-1. **Orquestração**: Databricks Workflows para agendamento
-2. **Incremental Load**: Mudança de overwrite para append incremental
-3. **Data Quality**: Validações automáticas com Great Expectations
-4. **Particionamento**: Particionamento por ano para performance
-5. **Otimização**: Z-ordering para queries frequentes
+1. **Data Quality**: Validações automáticas com Great Expectations
+2. **Particionamento**: Particionamento por ano para performance
+3. **Otimização**: Z-ordering para queries frequentes

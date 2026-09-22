@@ -41,7 +41,7 @@ for ano in ANOS_PROCESSAR:
         # ↑ Levanta exception se colunas críticas faltam
         
         # [3/4] APPEND (só executa se guardrails passaram)
-        df_bronze.write.mode("append").saveAsTable("proj_cvm_01_bronze.101_dre_dfp")
+        df_bronze.write.mode("append").saveAsTable("{SCHEMA_BRONZE}.101_dre_dfp")
         
     except Exception as e:
         # Bronze NÃO modificada (APPEND não foi executado)
@@ -122,7 +122,7 @@ Silver usa **REPLACE WHERE** (substituição atômica por período). Guardrail g
 ```python
 for ano in ANOS_PROCESSAR:
     # GUARDRAIL: Bronze tem dados?
-    count_bronze = spark.table("proj_cvm_01_bronze.101_dre_dfp") \
+    count_bronze = spark.table("{SCHEMA_BRONZE}.101_dre_dfp") \
         .filter(year(col("DT_REFER")) == ano) \
         .count()
     
@@ -137,7 +137,7 @@ for ano in ANOS_PROCESSAR:
     # REPLACE WHERE (substituição atômica)
     df_silver.write.format("delta").mode("overwrite") \
         .option("replaceWhere", f"ANO = {ano}") \
-        .saveAsTable("proj_cvm_02_silver.201_dre_dfp")
+        .saveAsTable("{SCHEMA_SILVER}.201_dre_dfp")
 ```
 
 ### Notebooks que Implementam
@@ -172,10 +172,10 @@ Erro em um ano não impede processamento de outros anos (loop continua).
 
 ## Rastreamento de Erros
 
-Todos os erros são registrados em `proj_cvm_04_apoio.controle_ingestao`:
+Todos os erros são registrados em `{SCHEMA_APOIO}.controle_ingestao`:
 
 ```sql
-INSERT INTO proj_cvm_04_apoio.controle_ingestao
+INSERT INTO {SCHEMA_APOIO}.controle_ingestao
     (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
 VALUES (
     'dre',                      -- fonte
@@ -193,7 +193,7 @@ Para investigar falhas:
 
 ```sql
 SELECT ano, fonte, mensagem, ingest_ts
-FROM proj_cvm_04_apoio.controle_ingestao
+FROM {SCHEMA_APOIO}.controle_ingestao
 WHERE status = 'ERROR'
 ORDER BY ingest_ts DESC;
 ```

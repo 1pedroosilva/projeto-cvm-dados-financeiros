@@ -26,20 +26,20 @@ Os dados são extraídos do [Portal de Dados Abertos da CVM](https://dados.cvm.g
 
 **Bronze** (`01_bronze/`): Preservação dos dados brutos da fonte
 * 3 notebooks: `101_cvm_dfp_dre`, `102_cvm_dfp_bpa`, `103_cvm_dfp_bpp`
-* Tabelas: `proj_cvm_01_bronze.101_dre_dfp`, `102_bpa_dfp`, `103_bpp_dfp`
+* Tabelas: `{SCHEMA_BRONZE}.101_dre_dfp`, `102_bpa_dfp`, `103_bpp_dfp` (via config_parametros)
 * Estratégia: APPEND-ONLY (histórico completo, idempotente)
 * Guardrails: arquivo vazio, schema inválido
 
 **Silver** (`02_silver/`): Dados limpos, tipados e enriquecidos
 * 3 notebooks: `201_cvm_dfp_dre`, `202_cvm_dfp_bpa`, `203_cvm_dfp_bpp`
-* Tabelas: `proj_cvm_02_silver.201_dre_dfp`, `202_bpa_dfp`, `203_bpp_dfp`
+* Tabelas: `{SCHEMA_SILVER}.201_dre_dfp`, `202_bpa_dfp`, `203_bpp_dfp` (via config_parametros)
 * Transformações: conversão de tipos, normalização de escala monetária, filtro de duplicatas, colunas derivadas (ANO, TRIMESTRE, MES)
 * Estratégia: REPLACE WHERE (substituição atômica por período)
 * Guardrails: bronze vazia para o ano
 
 **Gold** (`03_gold/`): Em desenvolvimento (métricas e KPIs)
 
-**Landing Zone**: `/Volumes/workspace/proj_cvm/landing/dfp/` - preservação de arquivos originais ZIP com metadados HTTP
+**Landing Zone**: `VOLUME_LANDING_DFP` (config_parametros) - preservação de arquivos originais ZIP com metadados HTTP
 
 ### Estrutura do Repositório
 
@@ -84,20 +84,20 @@ projeto-cvm-dados-financeiros/
 
 ### Databricks Asset Bundle (DAB)
 
-O projeto usa DAB para gerenciar infraestrutura como código. 3 ambientes configurados:
+O projeto usa DAB para gerenciar infraestrutura como código. 3 ambientes declarados em `ambientes.json`:
 
-**dev** (padrão):
+**dev** (padrão, único instanciado):
 * Catálogo: `workspace`
-* Schemas: `proj_cvm_dev_01_bronze`, `proj_cvm_dev_02_silver`
+* Prefixo de schema: `proj_cvm_dev`
 * Landing Zone: `/Volumes/workspace/proj_cvm/landing`
 
-**prod**:
+**test** (declarado, não instanciado):
 * Catálogo: `workspace`
-* Schemas: `proj_cvm_01_bronze`, `proj_cvm_02_silver`
+* Prefixo de schema: `proj_cvm_test`
 
-**ci**:
+**prod** (declarado, não instanciado):
 * Catálogo: `workspace`
-* Schemas: `proj_cvm_ci_01_bronze`, `proj_cvm_ci_02_silver`
+* Prefixo de schema: `proj_cvm_prod`
 
 Configuração em `databricks.yml` e `resources/jobs/*.yml`.
 
@@ -154,7 +154,7 @@ Detalhes em [`00_documentacao/tecnica/guardrails.md`](00_documentacao/tecnica/gu
 
 ### Rastreamento
 
-Tabela de controle `proj_cvm_05_apoio.controle_ingestao` registra:
+Tabela de controle `{SCHEMA_APOIO}.controle_ingestao` (via config_parametros) registra:
 * Cada ingestão (fonte, ano, timestamp, versão)
 * Erros (status ERROR, mensagem truncada em 500 chars)
 * Metadados da fonte (last_modified via HTTP)

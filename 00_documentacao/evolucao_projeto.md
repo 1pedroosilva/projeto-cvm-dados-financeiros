@@ -15,6 +15,38 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 
 
+## 21/09/2026 - Parametrizacao de Ambiente e Migracao de Schemas
+
+### Contexto
+O projeto tinha ~75 referencias hardcoded a `proj_cvm_*` em 11 arquivos .py. Qualquer mudanca de ambiente (dev->test->prod) exigia find-and-replace manual em todos os notebooks. O eixo AMBIENTE ja existia no `ambientes.json` mas os notebooks ignoravam o config e montavam nomes de schema por conta propria. O widget `MODO_DEV` nos 6 notebooks Bronze/Silver duplicava a logica de `CARGA` ja adicionada ao config. A tabela `controle_ingestao` era criada num notebook separado (002), o que quebrava a primeira execucao em schema novo.
+
+### Decisoes
+* **Substituir 75 referencias hardcoded por variaveis do config** -> Todo nome de schema, tabela e volume e derivado de `ambientes.json` via `config_parametros`. Nenhum notebook monta nome por conta propria. Principio: fonte unica, zero excoes
+* **`MODO_DEV` removido, substituido por `CARGA` do config** -> O eixo CARGA (incremental/completa) ja controla a janela de anos via `inicializar_anos_processar()`. O widget era redundante e tinha default diferente entre Bronze (False) e Silver (True), causando comportamento inconsistente
+* **`controle_ingestao` movida para o fluxo de DDL (`001_ddl_create_tables`)** -> Schema novo sem essa tabela quebra na primeira execucao do orquestrador (`get_novos_anos_para_processar` faz SELECT nela). O 002 permanece como validacao idempotente, mas a criacao primaria esta no 001
+* **`ANO_INICIAL_CVM = 2010` -> `ANO_INICIAL_PROJETO = 2021`** -> A janela do projeto comeca em 2021, alinhada com a landing zone. `CARGA=completa` agora processa 2021-ano corrente. Antes processava 2010-ano corrente, mas nenhuma tabela tinha dados anteriores a 2021
+* **`SCHEMA_VOLUME` derivado de `ambientes.json`** -> O schema do volume (`proj_cvm`) e compartilhado entre ambientes. Agora lido do JSON via `vol_config["schema"]`, nao hardcoded no 003_download
+* **Migracao via CTAS (CREATE TABLE LIKE + INSERT INTO SELECT)** -> Mais rapido que reprocessamento. Silver comparada ano a ano (18/18 pares batem) antes do drop dos schemas antigos
+
+### Implementado
+* `config_parametros`: `ANO_INICIAL_CVM` -> `ANO_INICIAL_PROJETO = 2021`; `SCHEMA_VOLUME` adicionado (derivado de `ambientes.json`); linha longa do print quebrada para ruff
+* `003_download`: fallback de anos alterado de `range(ano_atual - 5, ...)` para `range(ANO_INICIAL_PROJETO, ...)`; `proj_cvm` -> `{SCHEMA_VOLUME}` no CREATE SCHEMA/VOLUME
+* `001_ddl_create_tables`: `%run config_parametros` adicionado; todas as DDL convertidas para f-strings com `{SCHEMA_BRONZE}`, `{SCHEMA_SILVER}`, `{SCHEMA_GOLD}`, `{SCHEMA_APOIO}`; `controle_ingestao` CREATE TABLE adicionada
+* `002_ddl_controle_ingestao`: `%run config_parametros` adicionado; DDL convertidas para f-strings
+* `099_ddl_table_comments`: `%run config_parametros` adicionado; COMMENT ON TABLE/COLUMN convertidos para f-strings
+* `000_orquestrador_pipeline`: comentario sem schema cravado
+* `004_verificacao_diaria_landing`: `workspace.proj_cvm_05_apoio` -> `{CATALOG_NAME}.{SCHEMA_APOIO}`; comentario da landing zone limpo
+* `101-103 Bronze`: `MODO_DEV` removido; `SCHEMA_BRONZE`/`SCHEMA_APOIO` em f-strings; `.saveAsTable` convertido para f-string
+* `201-203 Silver`: `MODO_DEV` removido; `SCHEMA_SILVER`/`SCHEMA_BRONZE`/`SCHEMA_APOIO` em f-strings; `spark.table` e `.saveAsTable` convertidos para f-strings
+* `tests/test_config_parametros.py`: 3 assertes de 2010 atualizados para 2021
+* Migracao: 4 schemas `proj_cvm_dev_*` criados; 8 tabelas copiadas via CTAS; Silver comparada ano a ano (18/18); 4 schemas antigos dropados com CASCADE
+* Verificacao: `grep -rn "proj_cvm" --include=*.py .` (excluindo 04_exploracao, config, tests) vazio; `grep -rn "MODO_DEV" --include=*.py .` vazio; `ruff check .` verde; `pytest tests/` 8/8 verde
+
+### Key Insight
+Parametrizacao nao e so substituir strings -- e garantir que a fonte unica cobre todas as excoes. O `SCHEMA_VOLUME` era a excecao escondida: o volume mora num schema proprio (`proj_cvm`) que nao segue a regra de composicao de nomes. Sem declara-lo no `ambientes.json`, a "fonte unica" tinha um furo -- o 003_download era o unico arquivo que sabia o nome do schema do volume. Declarar `volume.schema` no JSON fechou a brecha: agora o config deriva 100% dos nomes, sem excoes.
+
+---
+
 ## 20/09/2026 - Enriquecimento Hierarquico de Contas na Silver
 
 ### Contexto
