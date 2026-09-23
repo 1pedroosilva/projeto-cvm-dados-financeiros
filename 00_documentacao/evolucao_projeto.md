@@ -15,6 +15,31 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 
 
+## 23/09/2026 - Correcao de %run, SCHEMA_SUFFIX e Refatoracao do Notebook de Testes
+
+### Contexto
+O job de testes de integracao falhava em `validacoes_integracao` com `NameError: SCHEMA_BRONZE is not defined`. Investigacao revelou tres bugs encadeados: o `%run` nao executava (metadado de magic ausente), `SCHEMA_SUFFIX` ainda era referenciado apos migracao para `AMBIENTE`, e a validacao 3 assumia `count_bronze == count_silver` sem descontar duplicatas.
+
+### Decisoes
+* **Corrigir %run manualmente pela UI** -> O `editAsset` escreve `# MAGIC %run` como texto sem marcar o metadado interno de magic; o runtime trata como comentario Python e ignora. A UI marca o metadado ao digitar `%run` na celula. Correcao manual e o workaround
+* **Trocar SCHEMA_SUFFIX por AMBIENTE no notebook de testes** -> A migracao para `ambientes.json` descontinuou `SCHEMA_SUFFIX` mas 3 linhas no `test_integracao_dre.py` ainda o referenciavam
+* **Validacao 3: `count_silver == count_bronze - duplicatas_bronze`** -> A Silver aplica `ROW_NUMBER=1` sobre `(CNPJ_CIA, DT_REFER, CD_CONTA, ORDEM_EXERC)` que colapsa duplicatas exatas da Bronze. Nao usar `Silver <= Bronze` pois passaria mesmo perdendo metade dos dados
+* **Coletar resultados em vez de abortar na primeira falha** -> Cada validacao roda em try/except, registra dict em `resultados` (nome, status, esperado, obtido, mensagem). Celula final imprime tabela e levanta AssertionError unica listando TODAS as falhas
+* **Validacao 4: incluir `ORDEM_EXERC` na chave** -> A DRE traz exercicio corrente (ULTIMO) e anterior (PENULTIMO) para a mesma conta; a PK e 4 colunas, nao 3
+
+### Implementado
+* `config_parametros.py`: cabecalho `%md` duplicado removido (causa raiz do `%run` misturado com markdown)
+* 3 notebooks (000, 003, test_integracao_dre): `%run` isolado em celula propria (corrigido manualmente pela UI)
+* `test_integracao_dre.py`: 3 referencias a `SCHEMA_SUFFIX` trocadas por `AMBIENTE` (linhas 9, 29, 168)
+* `test_integracao_dre.py`: refatoracao completa -- 5 validacoes em try/except, lista `resultados`, tabela final, assert unico
+* `test_integracao_dre.py`: validacao 4 com 4 colunas, validacao 5 confirmada (3 colunas de metadados existem na Bronze)
+* Commits: `9d3fe44` (isolamento %run), `c4b2034` (limpeza), `dc11d22` (SCHEMA_SUFFIX->AMBIENTE), `4fbe66e` (validacao 3), `bf1583d` (refatoracao coletar-resultados)
+
+### Key Insight
+O `editAsset` escreve `# MAGIC %run` como texto sem marcar o metadado da celula -- o arquivo passa no git e falha na execucao. Celula de magic se corrige pela UI, nao por API. Separadamente, a fonte CVM traz linhas duplicadas (76 em 2021, todas de INTER & CO, CNPJ 42.737.954/0001-21). A Window Function do 201 as elimina como efeito colateral de um filtro desenhado para versionamento, nao para deduplicacao de origem. Comportamento conhecido: Bronze pode ter duplicatas; Silver as colapsa; testes devem descontar.
+
+---
+
 ## 23/09/2026 - Alinhamento de Observabilidade (Grupo A)
 
 ### Contexto
