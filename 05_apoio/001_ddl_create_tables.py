@@ -17,9 +17,10 @@
 # MAGIC * **Metadados técnicos**: Colunas `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts`, `_source_file` para auditoria
 # MAGIC
 # MAGIC ## Estrutura Criada
-# MAGIC * **Schemas**: definidos por SCHEMA_BRONZE, SCHEMA_SILVER, SCHEMA_GOLD no config_parametros
-# MAGIC * **Tabelas Bronze**: `101_dre_dfp`, `102_bpa_dfp` (append-only com versionamento)
-# MAGIC * **Tabelas Silver**: `201_dre_dfp`, `202_bpa_dfp` (versão mais recente + enriquecimento)
+# MAGIC * **Schemas**: definidos por SCHEMA_BRONZE, SCHEMA_SILVER, SCHEMA_GOLD, SCHEMA_APOIO no config_parametros
+# MAGIC * **Tabelas Bronze**: `101_dre_dfp`, `102_bpa_dfp`, `103_bpp_dfp` (append-only com versionamento)
+# MAGIC * **Tabelas Silver**: `201_dre_dfp`, `202_bpa_dfp`, `203_bpp_dfp` (versão mais recente + enriquecimento)
+# MAGIC * **Tabelas de Apoio**: `controle_ingestao` (8 colunas, rastreia cada ingestão), `observabilidade_execucoes` (26 colunas, métricas detalhadas de execução)
 # MAGIC
 # MAGIC ## Função
 # MAGIC Script de apoio - Setup de infraestrutura Unity Catalog

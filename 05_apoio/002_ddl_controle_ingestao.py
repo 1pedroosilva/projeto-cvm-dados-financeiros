@@ -1,4 +1,5 @@
 # Databricks notebook source
+# DBTITLE 1,DOCUMENTAÇÃO
 # MAGIC %md
 # MAGIC # Tabela de Controle de Ingestão
 # MAGIC
@@ -6,18 +7,17 @@
 # MAGIC Criar tabela de controle que rastreia execuções do pipeline CVM - permite detecção inteligente de:
 # MAGIC * Novos anos disponíveis na CVM
 # MAGIC * Arquivos atualizados (via metadado HTTP Last-Modified)
-# MAGIC * Status de cada ingestão (sucesso, erro, em_progresso)
+# MAGIC * Status de cada ingestão (SUCCESS, ERROR)
 # MAGIC
-# MAGIC ## Estrutura
-# MAGIC * **fonte**: Identificador da fonte (dfp_dre, dfp_bpa, etc)
-# MAGIC * **ano**: Ano fiscal do arquivo
-# MAGIC * **url**: URL completa do arquivo na CVM
-# MAGIC * **last_modified_cvm**: Data de última modificação na CVM (header HTTP)
-# MAGIC * **ultima_ingestao_ts**: Timestamp da última ingestão bem-sucedida
-# MAGIC * **tamanho_bytes**: Tamanho do arquivo baixado
-# MAGIC * **registros_ingeridos**: Quantidade de registros processados
-# MAGIC * **status**: Status da ingestão (sucesso, erro, em_progresso)
-# MAGIC * **mensagem**: Mensagem de erro ou observações
+# MAGIC ## Estrutura (8 colunas)
+# MAGIC * **fonte** (STRING): Identificador da fonte (dre, bpa, bpp)
+# MAGIC * **ano** (INT): Ano fiscal do arquivo
+# MAGIC * **arquivo** (STRING): Nome do arquivo baixado (ex: `dfp_cia_aberta_2021.zip`)
+# MAGIC * **last_modified_cvm** (TIMESTAMP): Data de última modificação na CVM (header HTTP Last-Modified)
+# MAGIC * **versao_ingestao** (INT): Versão sequencial de ingestão (incrementa a cada reprocessamento)
+# MAGIC * **ingest_ts** (TIMESTAMP): Timestamp da ingestão
+# MAGIC * **status** (STRING): Status da ingestão (SUCCESS, ERROR)
+# MAGIC * **mensagem** (STRING): Mensagem de erro ou observações (truncada em 500 chars)
 
 # COMMAND ----------
 

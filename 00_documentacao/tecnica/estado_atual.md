@@ -1,17 +1,20 @@
 # Estado Atual do Projeto CVM
 
-> **Última atualização:** 23/09/2026  
+> **Última atualização:** 23/09/2026 (revisão de consistência)  
 > **Retrato do pipeline hoje — sem histórico, sem justificativas.**
 
 ---
 
 ## Jobs em Produção
 
-| Job | ID | Schedule | Notebooks Executados |
-|-----|-----|----------|---------------------|
-| **CVM - Verificação Diária Landing Zone** | 348419458655416 | Diário 06:00 BRT | `05_apoio/004_verificacao_diaria_landing.py` |
-| **CVM - Pipeline Completo Semanal** | 890867014997453 | Segunda 07:00 BRT | `01_bronze/101_cvm_dfp_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`02_silver/203_cvm_dfp_bpp.py` |
-| **[test] Testes de Integração - Pipeline CVM** | (criado via bundle) | Manual (GitHub Actions) | `05_apoio/001_ddl_create_tables.py`<br>`01_bronze/101_cvm_dfp_dre.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`06_testes/test_integracao_dre.py` |
+| Job | Target | ID | Schedule | Notebooks Executados |
+|-----|--------|-----|----------|---------------------|
+| **CVM - Verificação Diária Landing Zone** | dev | 348419458655416 | Diário 06:00 BRT | `05_apoio/004_verificacao_diaria_landing.py` |
+| **CVM - Pipeline Completo Semanal** | dev | 890867014997453 | Segunda 07:00 BRT | `01_bronze/101_cvm_dfp_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`02_silver/203_cvm_dfp_bpp.py` |
+| **[test] Testes de Integração - Pipeline CVM** | dev | 987359705402401 | Manual (GitHub Actions) | `05_apoio/001_ddl_create_tables.py`<br>`01_bronze/101_cvm_dfp_dre.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`06_testes/test_integracao_dre.py` |
+| **CVM - Verificação Diária Landing Zone** | test | 770519249168919 | Diário 06:00 BRT | `05_apoio/004_verificacao_diaria_landing.py` |
+| **CVM - Pipeline Completo Semanal** | test | 684250943587739 | Segunda 07:00 BRT | `01_bronze/101_cvm_dfp_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`02_silver/203_cvm_dfp_bpp.py` |
+| **[test] Testes de Integração - Pipeline CVM** | test | 474378723473259 | Manual (GitHub Actions) | `05_apoio/001_ddl_create_tables.py`<br>`01_bronze/101_cvm_dfp_dre.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`06_testes/test_integracao_dre.py` |
 
 ---
 
@@ -55,6 +58,14 @@
 
 ---
 
+### 📦 Histórico (não executado, mantido como registro)
+
+| Camada | Notebook | Ex-Função | Formato |
+|--------|----------|-----------|--------|
+| Exploração | `EDA_001_analise_dre_silver.ipynb` | Análise exploratória DRE Silver (investigação original que motivou correções de escala e hierarquia) | `.ipynb` (único no repo, exceção à padronização `.py`) |
+
+---
+
 ## Arquivos de Configuração
 
 | Arquivo | Função |
@@ -87,7 +98,7 @@
 | Silver | `202_bpa_dfp` | BPA estruturado + hierarquia |
 | Silver | `203_bpp_dfp` | BPP estruturado + hierarquia |
 | Apoio | `controle_ingestao` | Registro de processamento (ano, status, timestamp) |
-| Apoio | `observabilidade_execucoes` | Métricas detalhadas de execução (órfã — nenhum notebook popula) |
+| Apoio | `observabilidade_execucoes` | Métricas detalhadas de execução (populada por `registrar_observabilidade_execucao()` nos 6 notebooks Bronze/Silver: 101, 102, 103, 201, 202, 203) |
 
 ### Volume
 
