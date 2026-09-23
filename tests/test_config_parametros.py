@@ -129,4 +129,3 @@ def test_config_carrega_sem_dbutils_e_sem_workspace():
     assert config.AMBIENTE == "dev"
     assert config.CARGA == "incremental"
     assert config.SCHEMA_BRONZE == "proj_cvm_dev_01_bronze"
-    
