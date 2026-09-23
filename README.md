@@ -53,14 +53,16 @@ projeto-cvm-dados-financeiros/
 ├── 00_documentacao/
 │   ├── evolucao_projeto.md      # Histórico e decisões
 │   ├── tecnica/
-│   │   ├── arquitetura.md       # Especificação técnica completa
-│   │   ├── estado_atual.md      # Retrato do pipeline hoje
-│   │   └── guardrails.md        # Validações de qualidade
+│   │   ├── arquitetura.md            # Especificação técnica completa
+│   │   ├── decisoes_arquiteturais.md # Decisões de design e trade-offs
+│   │   ├── estado_atual.md           # Retrato do pipeline hoje
+│   │   └── guardrails.md             # Validações de qualidade
 │   └── negocio/
 │       └── dicionario_dados.md  # Conceitos de negócio CVM/DFP
 ├── 01_bronze/                   # Ingestão bruta (3 notebooks)
 ├── 02_silver/                   # Transformação (3 notebooks)
 ├── 03_gold/                     # Agregação (planejada)
+│   └── README.md                # Descrição da camada planejada
 ├── 04_exploracao/               # Análises exploratórias (3 notebooks EDA)
 ├── 05_apoio/
 │   ├── 000_orquestrador_pipeline.py
@@ -121,8 +123,10 @@ O job `pipeline_semanal` orquestra Bronze→Silver para DRE, BPA e BPP em três 
 
 **Jobs**:
 
-* `pipeline_semanal` — Bronze→Silver, semanal às segundas 07:00 (América/São_Paulo), ativo
-* `verificacao_diaria` — Verificação da landing zone, diário às 06:00 (América/São_Paulo), ativo
+* `pipeline_semanal` — Bronze→Silver, semanal às segundas 07:00 (América/São_Paulo). Ativo no target dev; pausado no target test
+* `verificacao_diaria` — Verificação da landing zone, diário às 06:00 (América/São_Paulo). Ativo no target dev; pausado no target test
+
+O target test existe para o job `testes_integracao_cvm` (executado sob demanda via GitHub Actions). Os jobs `pipeline_semanal` e `verificacao_diaria` são deployados no target test mas ficam pausados — não há execução automática agendada em test.
 
 **Deploy via DAB**:
 ```bash
@@ -194,6 +198,7 @@ Detalhes sobre estrutura dos dados e conceitos de negócio em [`00_documentacao/
 ## Documentação Complementar
 
 * **Arquitetura técnica**: [`00_documentacao/tecnica/arquitetura.md`](00_documentacao/tecnica/arquitetura.md)
+* **Decisões arquiteturais**: [`00_documentacao/tecnica/decisoes_arquiteturais.md`](00_documentacao/tecnica/decisoes_arquiteturais.md)
 * **Estado atual do projeto**: [`00_documentacao/tecnica/estado_atual.md`](00_documentacao/tecnica/estado_atual.md)
 * **Guardrails e validações**: [`00_documentacao/tecnica/guardrails.md`](00_documentacao/tecnica/guardrails.md)
 * **Dicionário de dados e negócio**: [`00_documentacao/negocio/dicionario_dados.md`](00_documentacao/negocio/dicionario_dados.md)
