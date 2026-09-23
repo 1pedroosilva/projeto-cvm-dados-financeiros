@@ -32,8 +32,6 @@
 # COMMAND ----------
 
 # DBTITLE 1,INICIALIZAR ANOS_PROCESSAR
-# Carregar configurações centralizadas do pipeline
-
 # Inicializar ANOS_PROCESSAR com detecção inteligente
 inicializar_anos_processar()
 

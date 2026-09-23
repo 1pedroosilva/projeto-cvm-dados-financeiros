@@ -37,8 +37,6 @@
 # COMMAND ----------
 
 # DBTITLE 1,INICIALIZAÇÃO E IMPORTS
-# Carregar configurações centralizadas do pipeline
-
 from datetime import datetime
 
 print("="*80)

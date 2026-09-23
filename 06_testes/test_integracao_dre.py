@@ -15,11 +15,6 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,CARREGAR CONFIGURAÇÕES
-# CARREGAR CONFIGURAÇÕES
-
-# COMMAND ----------
-
 # DBTITLE 1,IMPORTS
 # IMPORTS
 from pyspark.sql import SparkSession
