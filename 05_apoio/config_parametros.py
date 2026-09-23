@@ -3,11 +3,6 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
-# MAGIC %md
-# MAGIC
-
-# COMMAND ----------
-
 # Databricks notebook source
 # /// script
 # [tool.databricks.environment]
@@ -77,7 +72,7 @@ TIPOS_DFP = {
 # Eixos independentes: AMBIENTE (dev/test/prod) e CARGA (incremental/completa).
 
 
-def _encontrar_ambientes_json() -> str:
+def _encontrar_ambientes_json() -> str | None:
     """Encontra ambientes.json relativo ao notebook em execução.
 
     O config é carregado via %run e roda em dois contextos:
@@ -89,6 +84,21 @@ def _encontrar_ambientes_json() -> str:
     via dbutils.notebook.getContext() e subir até encontrar 05_apoio/ambientes.json.
     """
     import os
+
+    # Estrategia 0: procurar ao lado deste proprio arquivo.
+    # Fora do Databricks (pytest, clone local) o ambientes.json e vizinho
+    # de porta. Dentro do Databricks esse caminho nao resolve e a busca
+    # segue normalmente para as estrategias 1 e 2.
+    try:
+        aqui = os.path.dirname(os.path.abspath(__file__))
+        for candidate in (
+            os.path.join(aqui, "ambientes.json"),
+            os.path.join(aqui, "05_apoio", "ambientes.json"),
+        ):
+            if os.path.exists(candidate):
+                return candidate
+    except NameError:
+        pass
 
     # Estratégia 1: dbutils.notebook.getContext().notebookPath()
     # Disponível em notebook job tasks (não em Spark Connect puro).
@@ -132,10 +142,8 @@ def _encontrar_ambientes_json() -> str:
                     if os.path.exists(candidate):
                         return candidate
 
-    raise FileNotFoundError(
-        "ambientes.json não encontrado em 05_apoio/. "
-        "Verifique se o arquivo existe no projeto e foi incluído no bundle deploy."
-    )
+    # Nao achou. Quem chamou decide se isso e erro ou se da para degradar.
+    return None
 
 
 def _resolver_parametro(nome: str, config_json: dict, secao: str) -> str:
@@ -162,6 +170,32 @@ def _resolver_parametro(nome: str, config_json: dict, secao: str) -> str:
 
     return padrao
 
+# Config minimo para execucao fora do Databricks (pytest no GitHub Actions,
+# clone local, IDE). So entra em cena quando nao ha dbutils E o JSON nao foi
+# encontrado. Dentro do Databricks a ausencia do JSON continua sendo erro:
+# la, resolver errado significa gravar no schema errado.
+_CONFIG_DEGRADADO = {
+    "catalogo": "workspace",
+    "schemas": {
+        "bronze": "proj_cvm_dev_01_bronze",
+        "silver": "proj_cvm_dev_02_silver",
+        "gold": "proj_cvm_dev_03_gold",
+        "apoio": "proj_cvm_dev_05_apoio",
+    },
+    "volume_landing": "/Volumes/workspace/proj_cvm/landing",
+    "volume_schema": "proj_cvm",
+    "ambiente": "dev",
+    "carga": "incremental",
+}
+
+
+def _fora_do_databricks() -> bool:
+    """True quando nao ha dbutils: runner do GitHub, clone local, IDE."""
+    try:
+        dbutils
+    except NameError:
+        return True
+    return False
 
 def _carregar_config_ambiente() -> dict:
     """Carrega ambientes.json, resolve AMBIENTE e CARGA, deriva todas as variáveis.
@@ -173,6 +207,17 @@ def _carregar_config_ambiente() -> dict:
         ValueError: ambiente inválido ou declarado mas não instanciado.
     """
     json_path = _encontrar_ambientes_json()
+
+    if json_path is None:
+        if _fora_do_databricks():
+            print("⚠️  ambientes.json nao encontrado e sem dbutils: "
+                  "config degradado para AMBIENTE=dev, CARGA=incremental.")
+            return dict(_CONFIG_DEGRADADO)
+        raise FileNotFoundError(
+            "ambientes.json nao encontrado em 05_apoio/. "
+            "Verifique se o arquivo foi incluido no bundle deploy."
+        )
+
     with open(json_path, "r", encoding="utf-8") as f:
         config_json = json.load(f)
 
