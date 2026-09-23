@@ -1,12 +1,12 @@
 # Job Testes de Integração - Pipeline CVM
 # Propósito: Validação E2E (Bronze → Silver) em schemas isolados
-# Escopo: Pipeline DRE completo para ano 2010 (volume mínimo, execução rápida)
+# Escopo: Pipeline DRE completo para ano 2021 (volume minimo, execucao rapida)
 # Estratégia: Fail-fast via depends_on - falha em teste bloqueia próximos
 
 resources:
   jobs:
     testes_integracao_cvm:
-      name: "[CI] Testes de Integração - Pipeline CVM"
+      name: "[test] Testes de Integração - Pipeline CVM"
 
       # Configurações gerais do job
       max_concurrent_runs: 1
@@ -31,36 +31,36 @@ resources:
           notebook_task:
             notebook_path: ../../05_apoio/001_ddl_create_tables.py
             base_parameters:
-              SCHEMA_SUFFIX: "_test"
+              AMBIENTE: ${bundle.target}
 
-        # TASK 2: Ingestão Bronze DRE para ano 2010
-        - task_key: test_bronze_dre_2010
+        # TASK 2: Ingestao Bronze DRE para ano 2021
+        - task_key: test_bronze_dre_2021
           depends_on:
             - task_key: criar_schemas_teste
           notebook_task:
             notebook_path: ../../01_bronze/101_cvm_dfp_dre.py
             base_parameters:
-              SCHEMA_SUFFIX: "_test"
-              ANOS_OVERRIDE: "2010"
+              AMBIENTE: ${bundle.target}
+              ANOS_OVERRIDE: "2021"
 
-        # TASK 3: Transformação Silver DRE para ano 2010
-        - task_key: test_silver_dre_2010
+        # TASK 3: Transformacao Silver DRE para ano 2021
+        - task_key: test_silver_dre_2021
           depends_on:
-            - task_key: test_bronze_dre_2010
+            - task_key: test_bronze_dre_2021
           notebook_task:
             notebook_path: ../../02_silver/201_cvm_dfp_dre.py
             base_parameters:
-              SCHEMA_SUFFIX: "_test"
-              ANOS_OVERRIDE: "2010"
+              AMBIENTE: ${bundle.target}
+              ANOS_OVERRIDE: "2021"
 
-        # TASK 4: Validações de integração (contagens, PKs, metadados)
+        # TASK 4: Validacoes de integracao (contagens, PKs, metadados)
         - task_key: validacoes_integracao
           depends_on:
-            - task_key: test_silver_dre_2010
+            - task_key: test_silver_dre_2021
           notebook_task:
             notebook_path: ../../06_testes/test_integracao_dre.py
             base_parameters:
-              SCHEMA_SUFFIX: "_test"
+              AMBIENTE: ${bundle.target}
 
         # TASK 5: Limpar schemas de teste (COMENTADO - manter dados para debug)
         # Descomente quando testes estiverem estáveis e você não precisar mais
@@ -79,4 +79,4 @@ resources:
       tags:
         projeto: cvm-dados-financeiros
         tipo: testes-integracao
-        ambiente: ci
+        ambiente: ${bundle.target}

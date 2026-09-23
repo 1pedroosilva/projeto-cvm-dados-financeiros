@@ -42,6 +42,8 @@ targets:
     variables:
       catalog: workspace
       schema_prefix: proj_cvm_dev
+    presets:
+      name_prefix: ""
   
   # Ambiente de produção
   prod:
@@ -55,11 +57,11 @@ targets:
       # user_name: service-principal@databricks.com
       user_name: 1pedro.osilva@gmail.com
   
-  # Ambiente de CI/CD
-  ci:
+  # Ambiente de testes de integracao
+  test:
     mode: development
     variables:
       catalog: workspace
-      schema_prefix: proj_cvm_ci
+      schema_prefix: proj_cvm_test
     run_as:
       user_name: 1pedro.osilva@gmail.com

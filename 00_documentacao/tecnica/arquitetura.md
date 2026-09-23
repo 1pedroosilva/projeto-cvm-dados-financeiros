@@ -601,6 +601,8 @@ df_resultado = spark.sql("""
 
 **Referência técnica completa**: Ver skill `resiliencia-operacional` no projeto [databricks-genie-skills](https://github.com/1pedroosilva/databricks-genie-skills)
 
+> **Status de implementação (23/09/2026)**: Todos os 6 notebooks (101, 102, 103, 201, 202, 203) seguem o padrão de resiliência: `logging` estruturado, `try/except` por ano com isolamento de falhas, registro de `FAILED` no `controle_ingestao`, medição de duracao por ano (`time.time()`), relatório final com `anos_sucesso`/`anos_falha` e `raise RuntimeError` se houve falha.
+
 ## Segurança e Compliance
 
 * **Dados Públicos**: Dados da CVM são públicos, sem restrições de acesso
@@ -615,9 +617,23 @@ df_resultado = spark.sql("""
 
 ## Monitoramento
 
+### Observabilidade de Execução (controle_ingestao)
+
+Todos os 6 notebooks (101-103 Bronze, 201-203 Silver) registram na tabela `{SCHEMA_APOIO}.controle_ingestao`:
+* **Status**: `SUCCESS` ou `FAILED` por ano processado
+* **Timestamp**: `ingest_ts` de cada execução
+* **Duração**: Logada via `time.time()` (em logs do notebook, não persistida na tabela)
+* **Row count**: Logado via `df_silver.count()` (em logs do notebook, não persistido na tabela)
+* **Isolamento de falhas**: `try/except` por ano — erro em 1 ano não derruba os demais
+* **Relatório final**: `anos_sucesso`/`anos_falha` + `raise RuntimeError` se houve falha
+
+> **Tabela `observabilidade_execucoes`** (26 colunas): Já existe no DDL 001 mas NENHUM notebook a popula. Planejada para o Grupo B (evolução de métricas): adicionar `registros_processados`, `duracao_segundos`, `tipo_erro` persistidos.
+
+### Monitoramento de Infraestrutura
+
 * **Job Runs**: Histórico de execuções disponível no Databricks
 * **Delta History**: Auditoria de mudanças nas tabelas
-* **Logs**: Logs de execução de notebooks
+* **Logs**: Logs estruturados via `logging.basicConfig` (timestamp, nível, mensagem)
 
 ## Deploy e Infraestrutura
 

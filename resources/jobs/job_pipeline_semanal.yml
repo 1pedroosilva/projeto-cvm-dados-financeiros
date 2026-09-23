@@ -1,0 +1,68 @@
+# Job CVM - Pipeline Completo Semanal
+# Bronze -> Silver para DRE, BPA, BPP em tres trilhos paralelos.
+# Sem orquestrador e sem download (assumido ja feito pelo job diario).
+
+resources:
+  jobs:
+    pipeline_semanal:
+      name: "CVM - Pipeline Completo Semanal"
+
+      max_concurrent_runs: 1
+      timeout_seconds: 7200
+
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+
+      schedule:
+        quartz_cron_expression: "0 0 7 ? * MON"
+        timezone_id: "America/Sao_Paulo"
+        pause_status: UNPAUSED
+
+      tasks:
+        - task_key: bronze_dre
+          notebook_task:
+            notebook_path: ../../01_bronze/101_cvm_dfp_dre.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+
+        - task_key: bronze_bpa
+          notebook_task:
+            notebook_path: ../../01_bronze/102_cvm_dfp_bpa.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+
+        - task_key: bronze_bpp
+          notebook_task:
+            notebook_path: ../../01_bronze/103_cvm_dfp_bpp.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+
+        - task_key: silver_dre
+          depends_on:
+            - task_key: bronze_dre
+          notebook_task:
+            notebook_path: ../../02_silver/201_cvm_dfp_dre.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+
+        - task_key: silver_bpa
+          depends_on:
+            - task_key: bronze_bpa
+          notebook_task:
+            notebook_path: ../../02_silver/202_cvm_dfp_bpa.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+
+        - task_key: silver_bpp
+          depends_on:
+            - task_key: bronze_bpp
+          notebook_task:
+            notebook_path: ../../02_silver/203_cvm_dfp_bpp.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+
+      tags:
+        projeto: cvm
+        frequencia: semanal
+        ambiente: ${bundle.target}

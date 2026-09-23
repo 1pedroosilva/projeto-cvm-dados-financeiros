@@ -9,12 +9,12 @@ on:
   workflow_dispatch:
     inputs:
       ambiente:
-        description: 'Ambiente (dev/ci)'
+        description: 'Ambiente (dev/test)'
         required: false
-        default: 'ci'
+        default: 'test'
         type: choice
         options:
-          - ci
+          - test
           - dev
 
 env:

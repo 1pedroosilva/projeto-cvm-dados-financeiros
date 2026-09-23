@@ -15,6 +15,53 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 
 
+## 23/09/2026 - Alinhamento de Observabilidade (Grupo A)
+
+### Contexto
+Diagnostico de observabilidade do projeto revelou que 4 dos 6 notebooks (101, 102, 201, 202) nao seguiam o padrao de resiliencia ja estabelecido em 103 e 203. Usavam `print()` em vez de `logging` estruturado, nao registravam `FAILED` na tabela de controle, nao mediam duracao por ano, nao tinham `try/except` com isolamento de falhas, e nao geravam relatorio final de execucao.
+
+### Decisoes
+* **Alinhar 4 notebooks ao padrao 103/203, nao o contrario** -> 103 e 203 ja tinham o padrao correto (logger, try/except por ano, FAILED no controle, duracao, relatorio). Replicar o que funciona e mais seguro que redesenhar
+* **Grupo A primeiro (alinhamento), Grupo B depois (novas metricas)** -> Alinhar o que existe e baixo risco e alto valor. Novas colunas/metricas exigem ALTER TABLE e reprocessamento -- medio risco, pode esperar
+* **try/except envolve TODO o processamento do ano, nao so a extracao** -> Em 101/102 o try cobria apenas a extracao; transformacao e gravacao ficavam de fora. Um erro na gravacao derrubava o notebook inteiro
+
+### Implementado
+* **101 DRE Bronze**: imports (logging, time) + `logging.basicConfig` + logger substitui print + try/except envolve extracao->transformacao->gravacao->controle + `FAILED` no `controle_ingestao` + duracao por ano + logs `[SUCESSO]`/`[FALHA]`
+* **102 BPA Bronze**: mesmas mudancas adaptadas para BPA
+* **201 DRE Silver**: logger + try/except por ano (nao tinha) + `FAILED` no controle (nao tinha) + `time.time()` + `count_registros = df_silver.count()` + nova celula RELATORIO FINAL com `anos_sucesso`/`anos_falha` + `raise RuntimeError` se houve falha
+* **202 BPA Silver**: mesmas mudancas adaptadas para BPA (sem `DT_INI_EXERC` e `TIPO_ESTRUTURAL`, que BPA nao tem)
+* **Descoberta**: tabela `observabilidade_execucoes` (26 colunas) ja existe no DDL 001 mas NENHUM notebook a popula -- todos gravam em `controle_ingestao` (8 colunas). Grupo B precisa decidir se migra ou adiciona colunas
+
+### Key Insight
+O projeto ja tinha o padrao correto de observabilidade (em 103/203) mas nao o aplicava uniformemente. Quando um padrao funciona em parte do codigo, a divida tecnica nao esta em cria-lo -- esta em replica-lo. A `observabilidade_execucoes` orfa mostra que criar infraestrutura sem conectar quem a usa e trabalho pela metade.
+
+---
+
+## 22/09/2026 - Jobs Reais no Bundle, Target test e Criterio Assimetrico
+
+### Contexto
+O pytest quebrava no runner do GitHub porque config_parametros executava _carregar_config_ambiente em escopo de modulo e sem Databricks levantava FileNotFoundError. Separadamente, os jobs CVM reais rodavam soltos na UI, o YAML do bundle era ficcao (8 tasks) e o target ci nao existia no ambientes.json.
+
+### Decisoes
+* **Criterio assimetrico de degradacao no config** -> _encontrar_ambientes_json devolve None; sem dbutils degrada para dev/incremental (erro barato), com dbutils levanta FileNotFoundError (erro caro)
+* **Partir dos jobs reais, nao consertar o YAML antigo** -> job_verificacao_diaria.yml e job_pipeline_semanal.yml espelhando tasks/schedules dos jobs reais. job_pipeline_cvm.yml apagado
+* **Presets no dev para preservar nomes e schedules** -> mode: development prefixa e pausa; presets: { name_prefix: "", trigger_pause_status: UNPAUSED } reverte ambos
+* **Target ci -> test** -> ambientes.json so conhece dev/test/prod. ANOS_OVERRIDE tem precedencia sobre CARGA=completa (linha 636): job de teste usa ANOS_OVERRIDE=2021 sem CARGA
+
+### Implementado
+* config_parametros: Estrategia 0 (__file__), -> str | None, criterio assimetrico, teste novo, ruff per-file-ignores
+* job_verificacao_diaria.yml + job_pipeline_semanal.yml: AMBIENTE: ${bundle.target}. job_pipeline_cvm.yml + TEMPLATE_github_workflow.yml apagados
+* databricks.yml: presets no dev; target ci -> test (proj_cvm_test)
+* ambientes.json: test.existe=true; _nota_test atualizada
+* job_testes_integracao.yml: SCHEMA_SUFFIX -> AMBIENTE; ANOS_OVERRIDE 2010 -> 2021; sem CARGA
+* .github/workflows/testes_integracao.yml: ci/dev -> test/dev
+* Bundle: 6 jobs-lixo apagados (UI), diretorios stale .bundle/ limpos
+
+### Key Insight
+Criterio assimetrico de degradacao: tolerante onde o erro e barato, intolerante onde o erro e caro. Fora do Databricks (pytest, clone), degradar para dev/incremental e inofensivo -- ninguem grava. Dentro do Databricks, degradar significaria um job com --target test escrevendo silenciosamente em proj_cvm_dev. A mesma funcao aplica duas politicas opostas porque o custo do erro e diferente em cada contexto.
+
+---
+
 ## 21/09/2026 - Parametrizacao de Ambiente e Migracao de Schemas
 
 ### Contexto

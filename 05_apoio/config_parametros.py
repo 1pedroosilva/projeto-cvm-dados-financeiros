@@ -317,6 +317,101 @@ FONTE_TABELA_DESTINO = {
 # FUNÇÕES AUXILIARES
 # ============================================================================
 
+def registrar_observabilidade_execucao(
+    etapa: str,
+    fonte: str,
+    ano,
+    inicio_epoch: float,
+    duracao_segundos: float,
+    status: str,
+    registros_processados=None,
+    mensagem_erro=None,
+    tipo_erro=None,
+    last_modified_cvm=None,
+):
+    """Registra execução na tabela observabilidade_execucoes.
+    
+    Centraliza INSERT em observabilidade_execucoes para todos notebooks do pipeline.
+    Captura contexto do job (job_id, run_id, task_key) automaticamente via env vars.
+    
+    Args:
+        etapa: 'bronze', 'silver', 'verificacao', 'download'
+        fonte: 'dre', 'bpa', 'bpp', 'dre_silver', etc.
+        ano: Ano processado (int) ou None se múltiplos anos
+        inicio_epoch: timestamp de início (float de time.time())
+        duracao_segundos: duração em segundos (float)
+        status: 'SUCCESS', 'ERROR', 'SKIPPED', 'PARTIAL'
+        registros_processados: número de registros (opcional)
+        mensagem_erro: mensagem de erro (opcional, até 2000 chars)
+        tipo_erro: tipo do erro (opcional, ex: 'ValueError')
+        last_modified_cvm: last_modified do arquivo CVM (opcional, ISO format)
+    """
+    import uuid
+    
+    def _sql_str(val):
+        if val is None:
+            return 'NULL'
+        return "'" + str(val).replace("'", "''") + "'"
+    
+    # Capturar contexto do job
+    job_id = None
+    run_id = None
+    task_key = None
+    try:
+        _jid = os.getenv('DATABRICKS_JOB_ID')
+        if _jid:
+            job_id = int(_jid)
+        _rid = os.getenv('DATABRICKS_JOB_RUN_ID')
+        if _rid:
+            run_id = int(_rid)
+        task_key = os.getenv('DATABRICKS_JOB_TASK_KEY')
+    except Exception:
+        pass
+    
+    id_exec = str(uuid.uuid4())
+    notebook_path = None
+    try:
+        notebook_path = str(dbutils.notebook.getContext().notebookPath())
+    except Exception:
+        pass
+    
+    inicio_ts = datetime.fromtimestamp(inicio_epoch)
+    fim_ts = datetime.fromtimestamp(inicio_epoch + duracao_segundos)
+    
+    try:
+        spark.sql(f"""
+            INSERT INTO {CATALOG_NAME}.{SCHEMA_APOIO}.observabilidade_execucoes
+                (id_execucao, job_id, run_id, task_key, notebook_path,
+                 etapa, fonte, ano, status,
+                 inicio_ts, fim_ts, duracao_segundos,
+                 registros_processados,
+                 last_modified_cvm,
+                 tipo_erro, mensagem_erro,
+                 created_at)
+            VALUES (
+                {_sql_str(id_exec)},
+                {job_id or 'NULL'},
+                {run_id or 'NULL'},
+                {_sql_str(task_key)},
+                {_sql_str(notebook_path)},
+                {_sql_str(etapa)},
+                {_sql_str(fonte)},
+                {ano if ano is not None else 'NULL'},
+                {_sql_str(status)},
+                {_sql_str(inicio_ts.strftime('%Y-%m-%d %H:%M:%S'))},
+                {_sql_str(fim_ts.strftime('%Y-%m-%d %H:%M:%S'))},
+                {duracao_segundos},
+                {registros_processados if registros_processados is not None else 'NULL'},
+                {_sql_str(last_modified_cvm)},
+                {_sql_str(tipo_erro)},
+                {_sql_str(mensagem_erro)},
+                current_timestamp()
+            )
+        """)
+    except Exception as e:
+        # Observabilidade não deve quebrar o pipeline
+        print(f"⚠️  Erro ao registrar observabilidade: {e}")
+
 def get_url_arquivo_cvm(ano: int) -> str:
     """Constrói URL completa do arquivo ZIP DFP da CVM (contém todas demonstrações)."""
     return f"{CVM_BASE_URL}dfp_cia_aberta_{ano}.zip"

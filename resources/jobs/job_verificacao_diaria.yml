@@ -1,0 +1,31 @@
+# Job CVM - Verificacao Diaria Landing Zone
+# Unico job que fala com a fonte CVM: HEAD, compara Last-Modified,
+# arquiva versao atual em archive/ e baixa a nova. Grava em observabilidade_execucoes.
+
+resources:
+  jobs:
+    verificacao_diaria:
+      name: "CVM - Verificação Diária Landing Zone"
+
+      max_concurrent_runs: 1
+
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: "America/Sao_Paulo"
+        pause_status: UNPAUSED
+
+      tasks:
+        - task_key: verificacao_landing
+          notebook_task:
+            notebook_path: ../../05_apoio/004_verificacao_diaria_landing.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+
+      tags:
+        projeto: cvm
+        frequencia: diaria
+        ambiente: ${bundle.target}

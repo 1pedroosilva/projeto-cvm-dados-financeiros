@@ -1,7 +1,7 @@
 {
   "_sobre": "Resolucao de ambiente e de estrategia de carga do projeto CVM. Fonte unica: config_parametros.py le este arquivo em tempo de execucao e deriva dele todos os nomes de catalogo, schema, tabela e volume. Nenhum notebook monta nome por conta propria. Nao confundir com data contract (ODCS): este arquivo nao descreve colunas nem qualidade de dado.",
   "versao": "1.0.0",
-  "atualizado_em": "2026-09-20",
+  "atualizado_em": "2026-09-22",
 
   "ambiente": {
     "_sobre": "ONDE escrever. Eixo independente da carga.",
@@ -31,7 +31,7 @@
       "completa": "Forca todos os anos disponiveis. Equivale a inicializar_anos_processar(force_anos=get_anos_disponiveis_cvm())."
     },
     "_nota_migracao": "Substitui o widget MODO_DEV. MODO_DEV=true passa a ser CARGA=completa. O nome antigo dizia onde rodava; o novo diz o que faz.",
-    "_nota_test": "O job de teste precisa declarar CARGA=completa: em schema recem-criado nao ha estado anterior e a deteccao devolveria lista vazia, disparando o guardrail de ANOS_PROCESSAR vazio."
+    "_nota_test": "O job de teste usa ANOS_OVERRIDE para limitar a um ano. ANOS_OVERRIDE tem precedencia sobre CARGA em inicializar_anos_processar (linha 636): o bloco CARGA=completa so executa se not anos_override. CARGA=completa e redundante quando ANOS_OVERRIDE esta definido."
   },
 
   "composicao": {
@@ -58,8 +58,8 @@
     "test": {
       "catalogo": "workspace",
       "prefixo": "proj_cvm_test",
-      "existe": false,
-      "_nota": "Nasce quando houver teste de integracao real. Ate la, o config deve recusar com mensagem explicita."
+      "existe": true,
+      "_nota": "Ativado para testes de integracao via GitHub Actions (bundle deploy --target test)."
     },
     "prod": {
       "catalogo": "workspace",
