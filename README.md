@@ -4,7 +4,7 @@
 
 # Projeto CVM - Dados Financeiros
 
-Pipeline de ingestão e transformação de demonstrações financeiras de companhias abertas brasileiras, publicadas pela Comissão de Valores Mobiliários (CVM). Arquitetura medalhão (bronze, silver, gold) implementada em Databricks com Delta Lake e Unity Catalog.
+Pipeline de ingestão e transformação de demonstrações financeiras de companhias abertas brasileiras, publicadas pela Comissão de Valores Mobiliários (CVM). Arquitetura medalhão implementada em Databricks com Delta Lake e Unity Catalog — Bronze e Silver em produção, Gold planejada.
 
 > **📋 [Estado Atual do Projeto](00_documentacao/tecnica/estado_atual.md)** — Retrato de hoje: jobs ativos, notebooks em produção, utilitários e aposentados (sem histórico).
 
@@ -22,7 +22,7 @@ Os dados são extraídos do [Portal de Dados Abertos da CVM](https://dados.cvm.g
 ### Camadas de Dados
 
 ```
-[CVM Portal] → [Landing Zone] → [Bronze] → [Silver] → [Gold]
+[CVM Portal] → [Landing Zone] → [Bronze] → [Silver] → [Gold (planejada)]
      ZIP          UC Volume      Raw Data   Curated    KPIs
 ```
 
@@ -39,7 +39,7 @@ Os dados são extraídos do [Portal de Dados Abertos da CVM](https://dados.cvm.g
 * Estratégia: REPLACE WHERE (substituição atômica por período)
 * Guardrails: bronze vazia para o ano
 
-**Gold** (`03_gold/`): Em desenvolvimento (métricas e KPIs)
+**Gold** (`03_gold/`): Planejada (métricas e KPIs) — não implementada
 
 **Landing Zone**: `VOLUME_LANDING_DFP` (config_parametros) - preservação de arquivos originais ZIP com metadados HTTP
 
@@ -47,29 +47,39 @@ Os dados são extraídos do [Portal de Dados Abertos da CVM](https://dados.cvm.g
 
 ```
 projeto-cvm-dados-financeiros/
+├── .github/workflows/
+│   ├── ci.yml                   # Ruff + pytest (push/PR no main)
+│   └── testes_integracao.yml    # Deploy + run testes E2E (manual)
 ├── 00_documentacao/
+│   ├── evolucao_projeto.md      # Histórico e decisões
 │   ├── tecnica/
-│   │   ├── arquitetura.md      # Especificação técnica completa
-│   │   └── guardrails.md       # Validações de qualidade
+│   │   ├── arquitetura.md       # Especificação técnica completa
+│   │   ├── estado_atual.md      # Retrato do pipeline hoje
+│   │   └── guardrails.md        # Validações de qualidade
 │   └── negocio/
-│       └── dicionario_dados.md # Conceitos de negócio CVM/DFP
+│       └── dicionario_dados.md  # Conceitos de negócio CVM/DFP
 ├── 01_bronze/                   # Ingestão bruta (3 notebooks)
 ├── 02_silver/                   # Transformação (3 notebooks)
-├── 03_gold/                     # Agregação (em desenvolvimento)
-├── 04_exploracao/               # Análises exploratórias
+├── 03_gold/                     # Agregação (planejada)
+├── 04_exploracao/               # Análises exploratórias (3 notebooks EDA)
 ├── 05_apoio/
 │   ├── 000_orquestrador_pipeline.py
 │   ├── 001_ddl_create_tables.py
 │   ├── 002_ddl_controle_ingestao.py
 │   ├── 003_download_cvm_para_landing.py
+│   ├── 004_verificacao_diaria_landing.py
 │   ├── 099_ddl_table_comments.py
+│   ├── ambientes.json           # Resolução de ambiente e carga
 │   └── config_parametros.py
+├── 06_testes/
+│   └── test_integracao_dre.py   # Validação E2E Bronze→Silver
 ├── resources/jobs/
-│   ├── job_pipeline_cvm.yml          # Pipeline completo (8 tasks)
+│   ├── job_pipeline_semanal.yml      # Bronze→Silver semanal (6 tasks)
+│   ├── job_verificacao_diaria.yml    # Verificação diária landing zone
 │   └── job_testes_integracao.yml     # Testes E2E
 ├── tests/
 │   └── test_config_parametros.py
-├── databricks.yml               # Configuração DAB
+├── databricks.yml               # Configuração do bundle
 ├── ruff.toml                    # Linter
 └── LICENSE                      # MIT
 ```
@@ -79,21 +89,21 @@ projeto-cvm-dados-financeiros/
 * **Plataforma**: Databricks (Serverless Compute)
 * **Armazenamento**: Delta Lake + Unity Catalog
 * **Processamento**: Apache Spark (PySpark)
-* **Orquestração**: Databricks Workflows (Databricks Asset Bundle)
+* **Orquestração**: Lakeflow Jobs (Declarative Automation Bundles)
 * **Governança**: Unity Catalog (schemas, volumes, controle de ingestão)
 
 ## Configuração
 
-### Databricks Asset Bundle (DAB)
+### Declarative Automation Bundle
 
-O projeto usa DAB para gerenciar infraestrutura como código. 3 ambientes declarados em `ambientes.json`:
+O projeto usa bundle para gerenciar infraestrutura como código. 3 ambientes declarados em `ambientes.json`:
 
-**dev** (padrão, único instanciado):
+**dev** (padrão, instanciado):
 * Catálogo: `workspace`
 * Prefixo de schema: `proj_cvm_dev`
 * Landing Zone: `/Volumes/workspace/proj_cvm/landing`
 
-**test** (declarado, não instanciado):
+**test** (instanciado):
 * Catálogo: `workspace`
 * Prefixo de schema: `proj_cvm_test`
 
@@ -105,18 +115,16 @@ Configuração em `databricks.yml` e `resources/jobs/*.yml`.
 
 ## Execução
 
-### Via Databricks Workflows (Recomendado)
+### Via Lakeflow Jobs (Recomendado)
 
-O job `pipeline_cvm_completo` orquestra o pipeline completo:
+O job `pipeline_semanal` orquestra Bronze→Silver para DRE, BPA e BPP em três trilhos paralelos (6 tasks). Orquestração e download não são tasks deste job — o download é feito pelo job `verificacao_diaria`.
 
-1. **Orquestração**: Detecção inteligente de anos a processar (tabela de controle)
-2. **Download**: Arquivos CVM para Landing Zone
-3. **Bronze**: Ingestão paralela de DRE, BPA, BPP
-4. **Silver**: Transformação paralela de DRE, BPA, BPP
+**Jobs**:
 
-**Schedule**: Diário às 3h (América/São_Paulo), pausado por padrão.
+* `pipeline_semanal` — Bronze→Silver, semanal às segundas 07:00 (América/São_Paulo), ativo
+* `verificacao_diaria` — Verificação da landing zone, diário às 06:00 (América/São_Paulo), ativo
 
-**Deploy via DAB**:
+**Deploy via bundle**:
 ```bash
 # Validar configuração
 databricks bundle validate -t dev
@@ -125,19 +133,19 @@ databricks bundle validate -t dev
 databricks bundle deploy -t dev
 
 # Executar job manualmente
-databricks bundle run pipeline_cvm_completo -t dev
+databricks bundle run pipeline_semanal -t dev
 ```
 
 ### Testes de Integração
 
-Job `testes_integracao_cvm` valida pipeline Bronze→Silver para DRE (ano 2010):
+Job `testes_integracao_cvm` valida pipeline Bronze→Silver para DRE (ano 2021):
 
 ```bash
 # Deploy job de testes
-databricks bundle deploy -t ci
+databricks bundle deploy -t test
 
 # Executar testes
-databricks bundle run testes_integracao_cvm -t ci
+databricks bundle run testes_integracao_cvm -t test
 ```
 
 ## Validações e Qualidade
@@ -161,6 +169,11 @@ Tabela de controle `{SCHEMA_APOIO}.controle_ingestao` (via config_parametros) re
 * Erros (status ERROR, mensagem truncada em 500 chars)
 * Metadados da fonte (last_modified via HTTP)
 
+Tabela `{SCHEMA_APOIO}.observabilidade_execucoes` (via config_parametros) registra:
+* Métricas detalhadas de execução (etapa, fonte, duração, registros processados)
+* Contexto do job (job_id, run_id, task_key)
+* Status (SUCCESS, ERROR, SKIPPED, PARTIAL)
+
 ## Fonte de Dados
 
 **Origem**: [Portal de Dados Abertos da CVM](https://dados.cvm.gov.br/)
@@ -181,6 +194,7 @@ Detalhes sobre estrutura dos dados e conceitos de negócio em [`00_documentacao/
 ## Documentação Complementar
 
 * **Arquitetura técnica**: [`00_documentacao/tecnica/arquitetura.md`](00_documentacao/tecnica/arquitetura.md)
+* **Estado atual do projeto**: [`00_documentacao/tecnica/estado_atual.md`](00_documentacao/tecnica/estado_atual.md)
 * **Guardrails e validações**: [`00_documentacao/tecnica/guardrails.md`](00_documentacao/tecnica/guardrails.md)
 * **Dicionário de dados e negócio**: [`00_documentacao/negocio/dicionario_dados.md`](00_documentacao/negocio/dicionario_dados.md)
 
