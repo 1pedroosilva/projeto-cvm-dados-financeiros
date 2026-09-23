@@ -1,5 +1,7 @@
 ﻿# Arquitetura Técnica - Projeto CVM Dados Financeiros
 
+> **📋 [Estado Atual do Projeto](estado_atual.md)** — Retrato de hoje: jobs ativos, notebooks em produção, utilitários e aposentados (sem histórico).
+
 ## Visão Geral
 
 Este documento descreve a arquitetura técnica do projeto de ingestão e processamento de dados financeiros da CVM (Comissão de Valores Mobiliários).

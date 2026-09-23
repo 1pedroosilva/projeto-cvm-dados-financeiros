@@ -6,6 +6,8 @@
 
 Pipeline de ingestão e transformação de demonstrações financeiras de companhias abertas brasileiras, publicadas pela Comissão de Valores Mobiliários (CVM). Arquitetura medalhão (bronze, silver, gold) implementada em Databricks com Delta Lake e Unity Catalog.
 
+> **📋 [Estado Atual do Projeto](00_documentacao/tecnica/estado_atual.md)** — Retrato de hoje: jobs ativos, notebooks em produção, utilitários e aposentados (sem histórico).
+
 ## O que é este projeto
 
 Processa demonstrações financeiras padronizadas (DFP) da CVM:

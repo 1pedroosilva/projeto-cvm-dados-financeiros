@@ -1,4 +1,10 @@
 # Databricks notebook source
+# ============================================================================
+# APOSENTADO: Este notebook foi removido do pipeline automático em 23/09/2026
+# Substituído por: 004_verificacao_diaria_landing.py
+# Uso atual: Mantido para download manual de ano específico sem comparação
+#            de Last-Modified (útil para debug ou reprocessamento forçado)
+# ============================================================================
 # DBTITLE 1,DOCUMENTAÇÃO
 # MAGIC %md
 # MAGIC # Download de Arquivos CVM para Landing Zone
