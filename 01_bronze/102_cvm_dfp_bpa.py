@@ -78,7 +78,7 @@ logger.info("="*80)
 
 # DBTITLE 1,ORQUESTRAÇÃO RESILIENTE
 # Loop: Processar cada ano da lista ANOS_PROCESSAR
-# Lê arquivo ZIP da Landing Zone (já baixado por 002_download_cvm_para_landing)
+# Lê arquivo ZIP da Landing Zone (já baixado por 004_verificacao_diaria_landing)
 
 # Rastreamento de sucesso/falha
 anos_sucesso = []

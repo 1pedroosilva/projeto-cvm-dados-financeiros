@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # DBTITLE 1,DOCUMENTAÇÃO
 # MAGIC %md
 # MAGIC # Orquestrador de Pipeline - Detecção Inteligente de Períodos
@@ -88,7 +92,7 @@ print(f"Anos a processar: {ANOS_PROCESSAR if ANOS_PROCESSAR else 'Nenhum'}")
 print(f"Quantidade: {len(ANOS_PROCESSAR) if ANOS_PROCESSAR else 0} ano(s)")
 print(f"\nPróximos passos:")
 if ANOS_PROCESSAR:
-    print(f"  1. Executar notebook: 002_download_cvm_para_landing")
+    print(f"  1. Executar notebook: 004_verificacao_diaria_landing")
     print(f"  2. Executar notebooks Bronze: 101_cvm_dfp_dre, 102_cvm_dfp_bpa, 103_cvm_dfp_bpp")
     print(f"  3. Executar notebooks Silver: 201_cvm_dfp_dre, 202_cvm_dfp_bpa, 203_cvm_dfp_bpp")
 else:
