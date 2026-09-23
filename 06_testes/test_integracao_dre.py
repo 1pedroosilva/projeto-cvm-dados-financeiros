@@ -1,12 +1,16 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # DBTITLE 1,DOCUMENTAÇÃO
 # MAGIC %md
 # MAGIC # Teste de Integração E2E - Pipeline DRE (Bronze → Silver)
 # MAGIC
 # MAGIC **Propósito**: Validar execução ponta a ponta do pipeline DRE  
 # MAGIC **Escopo**: Bronze ingestão + Silver transformação + Validações de qualidade  
-# MAGIC **Dados**: Ano 2010 (volume mínimo, execução rápida)  
-# MAGIC **Ambientes**: Schemas isolados via SCHEMA_SUFFIX (produção vs teste)
+# MAGIC **Dados**: Ano 2021 (volume mínimo, execução rápida)  
+# MAGIC **Ambientes**: Schemas isolados via AMBIENTE (produção vs teste)
 
 # COMMAND ----------
 
@@ -26,7 +30,7 @@ print(f"ℹ️  Schemas configurados:")
 print(f"   Bronze: {SCHEMA_BRONZE}")
 print(f"   Silver: {SCHEMA_SILVER}")
 print(f"   Apoio: {SCHEMA_APOIO}")
-print(f"   Sufixo: '{SCHEMA_SUFFIX}'")
+print(f"   Ambiente: '{AMBIENTE}'")
 
 # COMMAND ----------
 
@@ -165,8 +169,5 @@ print(f"\n📈 Estatísticas:")
 print(f"   • Registros Bronze: {count_bronze:,}")
 print(f"   • Registros Silver: {count_silver:,}")
 print(f"   • Schemas testados: Bronze, Silver")
-print(f"   • Sufixo aplicado: '{SCHEMA_SUFFIX}'")
+print(f"   • Ambiente: '{AMBIENTE}'")
 print(f"\n✓ Pipeline DRE funcionando corretamente (Bronze → Silver)\n")
-
-# COMMAND ----------
-
