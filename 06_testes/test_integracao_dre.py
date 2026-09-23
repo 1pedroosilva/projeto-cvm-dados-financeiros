@@ -76,26 +76,49 @@ print(f"   ✓ Validação 2 passou")
 
 # COMMAND ----------
 
-# DBTITLE 1,VALIDAÇÃO 3: Sem perda de dados
+# DBTITLE 1,VALIDAÇÃO 3: Bronze - duplicatas = Silver
 # ============================================================================
-# VALIDAÇÃO 3: Contagens Bronze = Silver (sem perda de dados)
+# VALIDAÇÃO 3: Bronze - duplicatas = Silver (sem perda não explicada)
 # ============================================================================
-# Objetivo: Confirmar que transformação não perdeu registros
-# Critério: Mesmo número de linhas em Bronze e Silver
-# Nota: Assume-se que Bronze tem apenas versão mais recente para 2010
-#       (orquestrador não reprocessa anos, então _versao_ingestao é única)
+# Objetivo: Confirmar que a transformação não perdeu registros além da
+#           deduplicação esperada pela Window Function
+# Critério: count_silver == count_bronze - duplicatas_bronze
+# Nota: A Silver aplica ROW_NUMBER=1 sobre (CNPJ_CIA, DT_REFER, CD_CONTA,
+#       ORDEM_EXERC) ORDER BY _versao_ingestao DESC. Duplicatas exatas na
+#       Bronze (mesma chave, mesmo _versao_ingestao) são colapsadas como
+#       efeito colateral dessa Window Function.
 # ============================================================================
 
-print("✅ Validando: Contagens Bronze = Silver...")
+print("✅ Validando: Bronze - duplicatas = Silver...")
 
-assert count_bronze == count_silver, (
-    f"❌ FALHA: Perda de dados na transformação\n"
-    f"   Bronze: {count_bronze:,} registros\n"
-    f"   Silver: {count_silver:,} registros\n"
-    f"   Diferença: {count_bronze - count_silver:,} registros perdidos"
+from pyspark.sql import Window
+from pyspark.sql.functions import row_number, col
+
+# a) Calcular excedentes na Bronze pela mesma chave da Window Function do 201
+window_dedup = Window.partitionBy(
+    "CNPJ_CIA", "DT_REFER", "CD_CONTA", "ORDEM_EXERC"
+).orderBy(col("_versao_ingestao").desc())
+
+duplicatas_bronze = (
+    df_bronze
+    .withColumn("_row_num", row_number().over(window_dedup))
+    .filter(col("_row_num") > 1)
+    .count()
 )
 
-print(f"   ✅ Contagens batem: {count_bronze:,} registros")
+# b) Assert: Silver deve ter exatamente Bronze - duplicatas
+esperado_silver = count_bronze - duplicatas_bronze
+
+assert count_silver == esperado_silver, (
+    f"❌ FALHA: Perda de dados não explicada por deduplicação\n"
+    f"   Bronze: {count_bronze:,} registros\n"
+    f"   Duplicatas na Bronze (descartadas pela Window Function): {duplicatas_bronze:,}\n"
+    f"   Silver esperado: {esperado_silver:,} registros\n"
+    f"   Silver atual: {count_silver:,} registros\n"
+    f"   Diferença não explicada: {esperado_silver - count_silver:,} registros"
+)
+
+print(f"   ✅ Bronze: {count_bronze:,} | Duplicatas: {duplicatas_bronze:,} | Silver: {count_silver:,}")
 print(f"   ✓ Validação 3 passou")
 
 # COMMAND ----------
@@ -167,6 +190,7 @@ print("✅ TODOS OS TESTES PASSARAM")
 print("="*80)
 print(f"\n📈 Estatísticas:")
 print(f"   • Registros Bronze: {count_bronze:,}")
+print(f"   • Duplicatas Bronze (descartadas pela Silver): {duplicatas_bronze:,}")
 print(f"   • Registros Silver: {count_silver:,}")
 print(f"   • Schemas testados: Bronze, Silver")
 print(f"   • Ambiente: '{AMBIENTE}'")
