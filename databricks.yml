@@ -65,3 +65,15 @@ targets:
       schema_prefix: proj_cvm_test
     run_as:
       user_name: 1pedro.osilva@gmail.com
+    # O target test existe para o teste de integracao sob demanda (GitHub Actions).
+    # Jobs agendados aqui sao desligados por override, mantendo UNPAUSED nos
+    # YAMLs de job como padrao. O preset nao pode declarar UNPAUSED quando
+    # mode: development, por isso o override e no resource-level.
+    resources:
+      jobs:
+        verificacao_diaria:
+          schedule:
+            pause_status: PAUSED
+        pipeline_semanal:
+          schedule:
+            pause_status: PAUSED
