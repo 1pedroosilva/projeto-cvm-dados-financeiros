@@ -50,23 +50,33 @@ import io
 import pandas as pd
 from pyspark.sql.functions import current_timestamp, lit, year
 import json
+import logging
+import time
 
 # COMMAND ----------
 
 # DBTITLE 1,CONFIGURAÇÃO E PARÂMETROS
-# ANOS_PROCESSAR: Lista de anos definida pelo orquestrador
-# Orquestrador detecta automaticamente quais anos processar (novos ou atualizados)
+# Configurar logging estruturado e exibir parâmetros do processamento
+# Logging estruturado permite rastreabilidade completa da execução
 
-print("="*80)
-print("BRONZE - BPA (102)")
-print("="*80)
-print(f"Anos a processar: {ANOS_PROCESSAR}")
-print(f"Landing Zone: {VOLUME_LANDING_DFP}")
-print("="*80)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+logger.info("="*80)
+logger.info("BRONZE - BPA (102) - Balanço Patrimonial Ativo")
+logger.info("="*80)
+logger.info(f"Anos a processar: {ANOS_PROCESSAR}")
+logger.info(f"Landing Zone: {VOLUME_LANDING_DFP}")
+logger.info(f"Total de anos: {len(ANOS_PROCESSAR)}")
+logger.info("="*80)
 
 # COMMAND ----------
 
-# DBTITLE 1,EXTRAÇÃO DE DADOS DA LANDING ZONE
+# DBTITLE 1,ORQUESTRAÇÃO RESILIENTE
 # Loop: Processar cada ano da lista ANOS_PROCESSAR
 # Lê arquivo ZIP da Landing Zone (já baixado por 002_download_cvm_para_landing)
 
@@ -75,10 +85,11 @@ anos_sucesso = []
 anos_falha = []
 
 for ano in ANOS_PROCESSAR:
-    print(f"\n{'='*80}")
-    print(f"Processando ano: {ano}")
-    print("="*80)
-
+    inicio = time.time()
+    logger.info(f"\n{'='*80}")
+    logger.info(f"[INÍCIO] Processando ano={ano}")
+    logger.info("="*80)
+    
     try:
         # Caminhos
         ano_path = f"{VOLUME_LANDING_DFP}/{ano}"
@@ -109,7 +120,7 @@ for ano in ANOS_PROCESSAR:
         """).collect()[0]['count']
         
         if ja_processado > 0:
-            print(f"⏭️  Ano {ano} já processado com esta versão CVM - pulando")
+            logger.info(f"⏭️  [SKIP] Ano {ano} já processado com esta versão CVM")
             anos_sucesso.append(ano)
             continue
         
@@ -120,8 +131,8 @@ for ano in ANOS_PROCESSAR:
             WHERE year(DT_REFER) = {ano}
         """).collect()[0]['proxima_versao']
         
-        print(f"Versão de ingestão: {versao_atual}")
-        print(f"Last-Modified CVM: {last_modified_cvm}")
+        logger.info(f"[METADADOS] Versão de ingestão: {versao_atual}")
+        logger.info(f"[METADADOS] Last-Modified CVM: {last_modified_cvm}")
 
         # Ler ZIP diretamente da Landing Zone (Spark Connect compatível)
         # Não usa /tmp - lê direto do /Volumes/ path com open()
@@ -134,100 +145,132 @@ for ano in ANOS_PROCESSAR:
         
         # RECONCILIAÇÃO: Contagem inicial
         count_extraido = len(df_pandas)
-        print(f"Registros extraídos: {count_extraido:,}")
+        logger.info(f"[EXTRAÇÃO] Registros extraídos: {count_extraido:,}")
+
+        # TRANSFORMAÇÃO PARA SPARK COM VERSIONAMENTO
+        df_raw = spark.createDataFrame(df_pandas)
+
+        # RECONCILIAÇÃO: Validar conversão pandas → Spark
+        count_spark = df_raw.count()
+        logger.info(f"[RECONCILIAÇÃO] Extraído: {count_extraido:,} | Spark: {count_spark:,}")
+        assert count_extraido == count_spark, f"❌ Perda na conversão: {count_extraido} → {count_spark}"
+
+        # GUARDRAIL DE VALIDAÇÃO DE SCHEMA
+        df_validado = validar_e_projetar_schema(
+            df_raw,
+            COLUNAS_ESSENCIAIS_BPA,
+            f"BPA {ano}"
+        )
+
+        # RECONCILIAÇÃO: Validar que schema não rejeitou registros
+        count_validado = df_validado.count()
+        logger.info(f"[RECONCILIAÇÃO] Pós-validação: {count_validado:,}")
+        if count_validado < count_spark:
+            logger.warning(f"⚠️  {count_spark - count_validado} registros rejeitados na validação")
+
+        # ADICIONAR METADADOS TÉCNICOS
+        df_bronze = df_validado \
+            .withColumn("_versao_ingestao", lit(versao_atual)) \
+            .withColumn("_last_modified_cvm", lit(last_modified_cvm)) \
+            .withColumn("_ingest_ts", current_timestamp()) \
+            .withColumn("_source_file", lit(f"dfp_cia_aberta_BPA_con_{ano}.csv"))
+
+        # RECONCILIAÇÃO: Confirmar volume antes de gravar
+        count_gravar = df_bronze.count()
+        logger.info(f"[RECONCILIAÇÃO] Registros a gravar: {count_gravar:,}")
+        assert count_gravar == count_validado, f"❌ Perda após metadados: {count_validado} → {count_gravar}"
+
+        # CARGA APPEND-ONLY NA BRONZE
+        df_bronze.write \
+            .format("delta") \
+            .mode("append") \
+            .saveAsTable(f"{SCHEMA_BRONZE}.102_bpa_dfp")
+
+        logger.info(f"[GRAVAÇÃO] ✓ Ano {ano} gravado com sucesso (versão {versao_atual})")
+
+        # Registrar ingestão na tabela de controle
+        spark.sql(f"""
+            INSERT INTO {SCHEMA_APOIO}.controle_ingestao
+                (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
+            VALUES (
+                'bpa',
+                {ano},
+                'dfp_cia_aberta_{ano}.zip',
+                '{last_modified_cvm}',
+                {versao_atual},
+                current_timestamp(),
+                'SUCCESS',
+                NULL
+            )
+        """)
+
+        duracao = time.time() - inicio
+        anos_sucesso.append(ano)
+        logger.info(f"[SUCESSO] ano={ano} | duração={duracao:.2f}s | registros={count_gravar:,}")
+        
+        # Registrar observabilidade (Grupo B)
+        registrar_observabilidade_execucao(
+            etapa='bronze',
+            fonte='bpa',
+            ano=ano,
+            inicio_epoch=inicio,
+            duracao_segundos=duracao,
+            status='SUCCESS',
+            registros_processados=count_gravar,
+            last_modified_cvm=str(last_modified_cvm) if last_modified_cvm else None
+        )
         
     except Exception as e:
-        print(f"❌ ERRO ao processar ano {ano}: {e}")
+        duracao = time.time() - inicio
         anos_falha.append((ano, str(e)))
-        continue
-
-    # TRANSFORMAÇÃO PARA SPARK COM VERSIONAMENTO
-    # df_raw: Conversão do DataFrame pandas para Spark
-    # Mantém a estrutura original completa extraída da CVM
-
-    df_raw = spark.createDataFrame(df_pandas)
-
-    # RECONCILIAÇÃO: Validar conversão pandas → Spark
-    count_spark = df_raw.count()
-    print(f"DataFrame Spark criado: {count_spark:,} registros")
-    assert count_extraido == count_spark, f"❌ Perda na conversão: {count_extraido} → {count_spark}"
-
-    # GUARDRAIL DE VALIDAÇÃO DE SCHEMA
-    # df_validado: Validação de colunas essenciais e descarte de extras
-    # Protege contra mudanças no formato dos arquivos publicados pela CVM
-
-    df_validado = validar_e_projetar_schema(
-        df_raw,
-        COLUNAS_ESSENCIAIS_BPA,
-        f"BPA {ano}"
-    )
-
-    # RECONCILIAÇÃO: Validar que schema não rejeitou registros
-    count_validado = df_validado.count()
-    print(f"Registros pós-validação: {count_validado:,}")
-    if count_validado < count_spark:
-        print(f"⚠️  {count_spark - count_validado} registros rejeitados na validação")
-
-    # ADICIONAR METADADOS TÉCNICOS
-    # df_bronze: Enriquecimento com metadados de rastreabilidade
-    # Identificadores técnicos para auditoria e debug
-
-    df_bronze = df_validado \
-        .withColumn("_versao_ingestao", lit(versao_atual)) \
-        .withColumn("_last_modified_cvm", lit(last_modified_cvm)) \
-        .withColumn("_ingest_ts", current_timestamp()) \
-        .withColumn("_source_file", lit(f"dfp_cia_aberta_BPA_con_{ano}.csv"))
-
-    # RECONCILIAÇÃO: Confirmar volume antes de gravar
-    count_gravar = df_bronze.count()
-    print(f"✓ Confirmado: {count_gravar:,} registros a gravar")
-    assert count_gravar == count_validado, f"❌ Perda após metadados: {count_validado} → {count_gravar}"
-
-    # CARGA APPEND-ONLY NA BRONZE
-    # Gravação: APPEND puro (preserva histórico completo)
-    # Bronze nunca deleta dados - Silver filtra versão mais recente
-
-    df_bronze.write \
-        .format("delta") \
-        .mode("append") \
-        .saveAsTable(f"{SCHEMA_BRONZE}.102_bpa_dfp")
-
-    print(f"✓ Ano {ano} gravado com sucesso (versão {versao_atual})")
-    anos_sucesso.append(ano)
-
-    # Registrar ingestão na tabela de controle
-    spark.sql(f"""
-        INSERT INTO {SCHEMA_APOIO}.controle_ingestao
-            (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
-        VALUES (
-            'bpa',
-            {ano},
-            'dfp_cia_aberta_{ano}.zip',
-            '{last_modified_cvm}',
-            {versao_atual},
-            current_timestamp(),
-            'SUCCESS',
-            NULL
+        logger.error(f"[FALHA] ano={ano} | duração={duracao:.2f}s | erro={str(e)}")
+        
+        # Registrar observabilidade (Grupo B)
+        registrar_observabilidade_execucao(
+            etapa='bronze',
+            fonte='bpa',
+            ano=ano,
+            inicio_epoch=inicio,
+            duracao_segundos=duracao,
+            status='ERROR',
+            tipo_erro=type(e).__name__,
+            mensagem_erro=str(e)
         )
-    """)
-
-    print(f"✓ Ingestão registrada na tabela de controle")
+        
+        # Registrar falha na tabela de controle
+        try:
+            spark.sql(f"""
+                INSERT INTO {SCHEMA_APOIO}.controle_ingestao
+                    (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
+                VALUES (
+                    'bpa',
+                    {ano},
+                    'dfp_cia_aberta_{ano}.zip',
+                    NULL,
+                    NULL,
+                    current_timestamp(),
+                    'FAILED',
+                    '{str(e).replace("'", "''")}'
+                )
+            """)
+        except:
+            pass  # Se falhar ao registrar, não interromper processamento
 
 # COMMAND ----------
 
 # DBTITLE 1,RELATÓRIO FINAL
 # RELATÓRIO FINAL
-print(f"\n{'='*80}")
-print(f"BRONZE BPA - RELATÓRIO FINAL")
-print("="*80)
-print(f"✓ Sucesso: {anos_sucesso}")
+logger.info(f"\n{'='*80}")
+logger.info(f"BRONZE BPA - RELATÓRIO FINAL")
+logger.info("="*80)
+logger.info(f"✓ Sucesso: {anos_sucesso}")
 if anos_falha:
-    print(f"❌ Falhas: {[ano for ano, _ in anos_falha]}")
+    logger.warning(f"❌ Falhas: {[ano for ano, _ in anos_falha]}")
     for ano, erro in anos_falha:
-        print(f"   • Ano {ano}: {erro}")
+        logger.warning(f"   • Ano {ano}: {erro}")
 else:
-    print("✓ Nenhuma falha")
-print("="*80)
+    logger.info("✓ Nenhuma falha")
+logger.info("="*80)
 
 # Garantir falha de job quando há períodos não processados
 if anos_falha:
