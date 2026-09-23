@@ -234,10 +234,33 @@ for ano in ANOS_PROCESSAR:
         anos_sucesso.append(ano)
         logger.info(f"[SUCESSO] ano={ano} | duração={duracao:.2f}s | registros={count_registros:,}")
         
+        # Registrar observabilidade (Grupo B)
+        registrar_observabilidade_execucao(
+            etapa='silver',
+            fonte='bpp_silver',
+            ano=ano,
+            inicio_epoch=inicio,
+            duracao_segundos=duracao,
+            status='SUCCESS',
+            registros_processados=count_registros
+        )
+        
     except Exception as e:
         duracao = time.time() - inicio
         anos_falha.append((ano, str(e)))
         logger.error(f"[FALHA] ano={ano} | duração={duracao:.2f}s | erro={str(e)}")
+        
+        # Registrar observabilidade (Grupo B)
+        registrar_observabilidade_execucao(
+            etapa='silver',
+            fonte='bpp_silver',
+            ano=ano,
+            inicio_epoch=inicio,
+            duracao_segundos=duracao,
+            status='ERROR',
+            tipo_erro=type(e).__name__,
+            mensagem_erro=str(e)
+        )
         
         # Registrar falha na tabela de controle
         try:

@@ -24,6 +24,8 @@ Bronze usa estratégia **APPEND-ONLY**. Guardrails garantem que apenas dados vá
 | **Arquivo vazio** | `len(df_pandas) == 0` | PARA (Bronze preservada) | Evita DELETE de dados bons seguido de APPEND vazio |
 | **Schema inválido** | Colunas essenciais faltando | PARA (Bronze preservada) | Via `validar_e_projetar_schema()` - valida presença de colunas críticas definidas em `config_parametros.py` |
 
+> **⚠️ Status (23/09/2026)**: O guardrail "Arquivo vazio" está documentado mas **não implementado** nos notebooks Bronze. Planejado para o Grupo B. O guardrail "Schema inválido" está implementado via `validar_e_projetar_schema()`.
+
 ### Fluxo de Erro
 
 ```python
@@ -45,7 +47,7 @@ for ano in ANOS_PROCESSAR:
         
     except Exception as e:
         # Bronze NÃO modificada (APPEND não foi executado)
-        print(f"ERRO: {e}")
+        logger.error(f"[FALHA] ano={ano} | erro={e}")
         # Registra erro em controle_ingestao
         # Continua para próximo ano
         continue
@@ -184,7 +186,7 @@ VALUES (
     NULL,                       -- last_modified (NULL em erro)
     NULL,                       -- versão (NULL em erro)
     current_timestamp(),        -- timestamp do erro
-    'ERROR',                    -- status
+    'FAILED',                   -- status
     'Arquivo vazio! Abortando.' -- mensagem de erro (truncada em 500 chars)
 )
 ```
@@ -194,7 +196,7 @@ Para investigar falhas:
 ```sql
 SELECT ano, fonte, mensagem, ingest_ts
 FROM {SCHEMA_APOIO}.controle_ingestao
-WHERE status = 'ERROR'
+WHERE status = 'FAILED'
 ORDER BY ingest_ts DESC;
 ```
 
