@@ -50,7 +50,7 @@ targets:
     mode: production
     variables:
       catalog: workspace
-      schema_prefix: proj_cvm
+      schema_prefix: proj_cvm_prod
     # Validações obrigatórias para produção
     run_as:
       # Em produção, especificar service principal

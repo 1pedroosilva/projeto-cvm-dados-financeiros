@@ -79,7 +79,7 @@ projeto-cvm-dados-financeiros/
 │   └── job_testes_integracao.yml     # Testes E2E
 ├── tests/
 │   └── test_config_parametros.py
-├── databricks.yml               # Configuração do bundle
+├── databricks.yml               # Configuração DAB
 ├── ruff.toml                    # Linter
 └── LICENSE                      # MIT
 ```
@@ -89,14 +89,14 @@ projeto-cvm-dados-financeiros/
 * **Plataforma**: Databricks (Serverless Compute)
 * **Armazenamento**: Delta Lake + Unity Catalog
 * **Processamento**: Apache Spark (PySpark)
-* **Orquestração**: Lakeflow Jobs (Declarative Automation Bundles)
+* **Orquestração**: Databricks Workflows (Databricks Asset Bundles)
 * **Governança**: Unity Catalog (schemas, volumes, controle de ingestão)
 
 ## Configuração
 
-### Declarative Automation Bundle
+### Databricks Asset Bundle (DAB)
 
-O projeto usa bundle para gerenciar infraestrutura como código. 3 ambientes declarados em `ambientes.json`:
+O projeto usa DAB para gerenciar infraestrutura como código. 3 ambientes declarados em `ambientes.json`:
 
 **dev** (padrão, instanciado):
 * Catálogo: `workspace`
@@ -115,7 +115,7 @@ Configuração em `databricks.yml` e `resources/jobs/*.yml`.
 
 ## Execução
 
-### Via Lakeflow Jobs (Recomendado)
+### Via Databricks Workflows (Recomendado)
 
 O job `pipeline_semanal` orquestra Bronze→Silver para DRE, BPA e BPP em três trilhos paralelos (6 tasks). Orquestração e download não são tasks deste job — o download é feito pelo job `verificacao_diaria`.
 
@@ -124,7 +124,7 @@ O job `pipeline_semanal` orquestra Bronze→Silver para DRE, BPA e BPP em três 
 * `pipeline_semanal` — Bronze→Silver, semanal às segundas 07:00 (América/São_Paulo), ativo
 * `verificacao_diaria` — Verificação da landing zone, diário às 06:00 (América/São_Paulo), ativo
 
-**Deploy via bundle**:
+**Deploy via DAB**:
 ```bash
 # Validar configuração
 databricks bundle validate -t dev
