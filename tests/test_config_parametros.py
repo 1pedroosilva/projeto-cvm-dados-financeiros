@@ -115,3 +115,17 @@ def test_normalizacao_preserva_o_valor_do_timestamp():
     # Apenas tzinfo muda (None → UTC)
     assert dt_naive.tzinfo is None
     assert dt_aware.tzinfo == timezone.utc
+
+def test_config_carrega_sem_dbutils_e_sem_workspace():
+    """O modulo precisa importar fora do Databricks, senao o CI morre na coleta.
+
+    Bug historico (21/09): a centralizacao em ambientes.json fez o config
+    depender de dbutils no import. No runner do GitHub nao ha dbutils nem
+    /Workspace, entao o pytest quebrava antes de rodar qualquer teste.
+
+    Protecao: este teste quebra se alguem voltar a exigir Databricks para
+    carregar a configuracao.
+    """
+    assert config.AMBIENTE == "dev"
+    assert config.CARGA == "incremental"
+    assert config.SCHEMA_BRONZE == "proj_cvm_dev_01_bronze"
