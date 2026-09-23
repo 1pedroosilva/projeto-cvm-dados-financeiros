@@ -6,7 +6,7 @@
 include = ["tests/**/*.py", "05_apoio/config_parametros.py"]
 
 line-length = 100
-builtins = ["dbutils"]
+builtins = ["dbutils", "spark"]
 
 [lint]
 select = ["E", "F", "W", "I", "DTZ"]
@@ -14,7 +14,7 @@ select = ["E", "F", "W", "I", "DTZ"]
 [lint.per-file-ignores]
 # Notebooks Databricks nao terminam com quebra de linha: a plataforma
 # remove ao serializar. Corrigir na mao so duraria ate o proximo save.
-"05_apoio/config_parametros.py" = ["W292"]
+"05_apoio/config_parametros.py" = ["W292", "W293"]
 
 # Arquivos de teste editados pelo editor do Databricks sofrem do mesmo:
 # a plataforma remove a quebra final e deixa espacos na linha em branco.

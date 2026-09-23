@@ -375,8 +375,8 @@ def registrar_observabilidade_execucao(
     except Exception:
         pass
     
-    inicio_ts = datetime.fromtimestamp(inicio_epoch)
-    fim_ts = datetime.fromtimestamp(inicio_epoch + duracao_segundos)
+    inicio_ts = datetime.fromtimestamp(inicio_epoch, tz=timezone.utc)
+    fim_ts = datetime.fromtimestamp(inicio_epoch + duracao_segundos, tz=timezone.utc)
     
     try:
         spark.sql(f"""
