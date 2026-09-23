@@ -27,8 +27,12 @@
 # COMMAND ----------
 
 # DBTITLE 1,INICIALIZAÇÃO E IMPORTS
+# MAGIC %run ./config_parametros
+
+# COMMAND ----------
+
+# DBTITLE 1,INICIALIZAR ANOS_PROCESSAR
 # Carregar configurações centralizadas do pipeline
-%run ./config_parametros
 
 # Inicializar ANOS_PROCESSAR com detecção inteligente
 inicializar_anos_processar()

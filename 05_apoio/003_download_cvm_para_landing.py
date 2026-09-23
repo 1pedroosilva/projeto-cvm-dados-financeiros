@@ -31,9 +31,13 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,CARREGAR CONFIG
+# MAGIC %run ./config_parametros
+
+# COMMAND ----------
+
 # DBTITLE 1,INICIALIZAÇÃO E IMPORTS
 # Carregar configurações centralizadas do pipeline
-%run ./config_parametros
 
 from datetime import datetime
 

@@ -1,20 +1,22 @@
 # Databricks notebook source
 # DBTITLE 1,DOCUMENTAÇÃO
 # MAGIC %md
-# MAGIC # ============================================================================
 # MAGIC # Teste de Integração E2E - Pipeline DRE (Bronze → Silver)
-# MAGIC # ============================================================================
-# MAGIC # Propósito: Validar execução ponta a ponta do pipeline DRE
-# MAGIC # Escopo: Bronze ingestão + Silver transformação + Validações de qualidade
-# MAGIC # Dados: Ano 2010 (volume mínimo, execução rápida)
-# MAGIC # Ambientes: Schemas isolados via SCHEMA_SUFFIX (produção vs teste)
-# MAGIC # ============================================================================
+# MAGIC
+# MAGIC **Propósito**: Validar execução ponta a ponta do pipeline DRE  
+# MAGIC **Escopo**: Bronze ingestão + Silver transformação + Validações de qualidade  
+# MAGIC **Dados**: Ano 2010 (volume mínimo, execução rápida)  
+# MAGIC **Ambientes**: Schemas isolados via SCHEMA_SUFFIX (produção vs teste)
+
+# COMMAND ----------
+
+# DBTITLE 1,CARREGAR CONFIGURAÇÕES
+# MAGIC %run ../05_apoio/config_parametros
 
 # COMMAND ----------
 
 # DBTITLE 1,CARREGAR CONFIGURAÇÕES
 # CARREGAR CONFIGURAÇÕES
-%run ../05_apoio/config_parametros
 
 # COMMAND ----------
 
