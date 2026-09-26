@@ -1,6 +1,6 @@
 # Job Testes de Integração - Pipeline CVM
 # Propósito: Validação E2E (Bronze → Silver) em schemas isolados
-# Escopo: Pipeline DRE completo para ano 2021 (volume minimo, execucao rapida)
+# Escopo: Pipelines DRE, BPA e BPP completos para ano 2021 (volume minimo, execucao rapida)
 # Estratégia: Fail-fast via depends_on - falha em teste bloqueia próximos
 
 resources:
@@ -53,8 +53,8 @@ resources:
               AMBIENTE: ${bundle.target}
               ANOS_OVERRIDE: "2021"
 
-        # TASK 4: Validacoes de integracao (contagens, PKs, metadados)
-        - task_key: validacoes_integracao
+        # TASK 4: Validacoes de integracao DRE (contagens, PKs, metadados)
+        - task_key: validacoes_integracao_dre
           depends_on:
             - task_key: test_silver_dre_2021
           notebook_task:
@@ -62,13 +62,71 @@ resources:
             base_parameters:
               AMBIENTE: ${bundle.target}
 
-        # TASK 5: Limpar schemas de teste (COMENTADO - manter dados para debug)
+        # TASK 5: Ingestao Bronze BPA para ano 2021
+        - task_key: test_bronze_bpa_2021
+          depends_on:
+            - task_key: validacoes_integracao_dre
+          notebook_task:
+            notebook_path: ../../01_bronze/102_cvm_dfp_bpa.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+              ANOS_OVERRIDE: "2021"
+
+        # TASK 6: Transformacao Silver BPA para ano 2021
+        - task_key: test_silver_bpa_2021
+          depends_on:
+            - task_key: test_bronze_bpa_2021
+          notebook_task:
+            notebook_path: ../../02_silver/202_cvm_dfp_bpa.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+              ANOS_OVERRIDE: "2021"
+
+        # TASK 7: Validacoes de integracao BPA (contagens, PKs, metadados)
+        - task_key: validacoes_integracao_bpa
+          depends_on:
+            - task_key: test_silver_bpa_2021
+          notebook_task:
+            notebook_path: ../../06_testes/test_integracao_bpa.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+
+        # TASK 8: Ingestao Bronze BPP para ano 2021
+        - task_key: test_bronze_bpp_2021
+          depends_on:
+            - task_key: validacoes_integracao_bpa
+          notebook_task:
+            notebook_path: ../../01_bronze/103_cvm_dfp_bpp.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+              ANOS_OVERRIDE: "2021"
+
+        # TASK 9: Transformacao Silver BPP para ano 2021
+        - task_key: test_silver_bpp_2021
+          depends_on:
+            - task_key: test_bronze_bpp_2021
+          notebook_task:
+            notebook_path: ../../02_silver/203_cvm_dfp_bpp.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+              ANOS_OVERRIDE: "2021"
+
+        # TASK 10: Validacoes de integracao BPP (contagens, PKs, metadados)
+        - task_key: validacoes_integracao_bpp
+          depends_on:
+            - task_key: test_silver_bpp_2021
+          notebook_task:
+            notebook_path: ../../06_testes/test_integracao_bpp.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+
+        # TASK 11: Limpar schemas de teste (COMENTADO - manter dados para debug)
         # Descomente quando testes estiverem estáveis e você não precisar mais
         # inspecionar os dados após falhas
         #
         # - task_key: limpar_schemas_teste
         #   depends_on:
-        #     - task_key: validacoes_integracao
+        #     - task_key: validacoes_integracao_bpp
         #   run_if: ALL_DONE  # Roda sempre, mesmo se testes falharem
         #   notebook_task:
         #     notebook_path: ../../06_testes/cleanup_schemas_teste.py
