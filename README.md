@@ -74,7 +74,9 @@ projeto-cvm-dados-financeiros/
 │   ├── ambientes.json           # Resolução de ambiente e carga
 │   └── config_parametros.py
 ├── 06_testes/
-│   └── test_integracao_dre.py   # Validação E2E Bronze→Silver
+│   ├── test_integracao_bpa.py   # Validação E2E BPA Bronze→Silver
+│   ├── test_integracao_bpp.py   # Validação E2E BPP Bronze→Silver
+│   └── test_integracao_dre.py   # Validação E2E DRE Bronze→Silver
 ├── resources/jobs/
 │   ├── job_pipeline_semanal.yml      # Bronze→Silver semanal (6 tasks)
 │   ├── job_verificacao_diaria.yml    # Verificação diária landing zone
@@ -142,7 +144,7 @@ databricks bundle run pipeline_semanal -t dev
 
 ### Testes de Integração
 
-Job `testes_integracao_cvm` valida pipeline Bronze→Silver para DRE (ano 2021):
+Job `testes_integracao_cvm` valida pipeline Bronze→Silver para DRE, BPA e BPP (ano 2021). Execução sequencial com fail-fast: cada demonstração percorre 3 tasks (Bronze, Silver, validação) e a próxima só inicia após a validação da anterior — DRE → BPA → BPP.
 
 ```bash
 # Deploy job de testes

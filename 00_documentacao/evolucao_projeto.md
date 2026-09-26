@@ -15,6 +15,28 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 
 
+## 26/09/2026 - Testes de Integracao BPA e BPP + Cadeia Sequencial no Job
+
+### Contexto
+O job de testes de integracao cobria apenas DRE. As demonstracoes BPA e BPP nao tinham testes E2E, deixando duas das tres demonstracoes sem validacao automatizada de Bronze→Silver. O notebook `test_integracao_dre.py` ja estabelecia o padrao (5 validacoes em try/except, coleta em lista `resultados`, resumo final com raise).
+
+### Decisoes
+* **Replicar o padrao do DRE, nao criar novo** -> O notebook de testes DRE ja tinha o padrao correto. Replicar para BPA e BPP e mais seguro que redesenhar
+* **Cadeia sequencial DRE→BPA→BPP em vez de paralelo** -> O job de testes executa sequencial com fail-fast: se DRE falhar, BPA e BPP nao executam. Cada demonstracao tem 3 tasks (Bronze, Silver, validacao) e a proxima depende da validacao da anterior
+* **Task key renomeado: `validacoes_integracao` → `validacoes_integracao_dre`** -> O nome generico era heranca de quando so existia DRE. Com 3 validacoes, o sufixo remove ambiguidade
+
+### Implementado
+* `06_testes/test_integracao_bpa.py`: 9 celulas replicando o padrao DRE, tabelas 102_bpa_dfp/202_bpa_dfp, 5 validacoes, resumo final
+* `06_testes/test_integracao_bpp.py`: 9 celulas replicando o padrao DRE, tabelas 103_bpp_dfp/203_bpp_dfp, 5 validacoes, resumo final
+* `resources/jobs/job_testes_integracao.yml`: 6 tasks adicionadas (tasks 5-10), task 4 renomeada, dependencia do cleanup atualizada
+* Deploy do bundle no target test e execucao: 10/10 tasks SUCCESS em ~4 min
+* Commit `e8ef05a` no main
+
+### Key Insight
+BPA e BPP nao tem `DT_INI_EXERC` — a coluna existe na DRE mas nao nessas duas demonstracoes. A ausencia nao afeta nenhuma validacao porque `DT_INI_EXERC` nao e parte da chave de particionamento da Window Function nem das PKs validadas. A replicacao do padrao DRE para BPA e BPP foi literal, confirmando que o padrao de testes e agnostico a colunas especificas de cada demonstracao.
+
+---
+
 ## 23/09/2026 - Correcao de %run, SCHEMA_SUFFIX e Refatoracao do Notebook de Testes
 
 ### Contexto

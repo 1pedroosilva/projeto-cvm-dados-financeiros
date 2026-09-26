@@ -1,6 +1,6 @@
 # Estado Atual do Projeto CVM
 
-> **Última atualização:** 23/09/2026 (pause de jobs agendados do target test)  
+> **Última atualização:** 26/09/2026 (testes de integração BPA e BPP)  
 > **Retrato do pipeline hoje — sem histórico, sem justificativas.**
 
 ---
@@ -11,10 +11,10 @@
 |-----|--------|-----|----------|-------|---------------------|
 | **CVM - Verificação Diária Landing Zone** | dev | 348419458655416 | Diário 06:00 BRT | UNPAUSED | `05_apoio/004_verificacao_diaria_landing.py` |
 | **CVM - Pipeline Completo Semanal** | dev | 890867014997453 | Segunda 07:00 BRT | UNPAUSED | `01_bronze/101_cvm_dfp_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`02_silver/203_cvm_dfp_bpp.py` |
-| **[test] Testes de Integração - Pipeline CVM** | dev | 987359705402401 | Manual (GitHub Actions) | — | `05_apoio/001_ddl_create_tables.py`<br>`01_bronze/101_cvm_dfp_dre.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`06_testes/test_integracao_dre.py` |
+| **[test] Testes de Integração - Pipeline CVM** | dev | 987359705402401 | Manual (GitHub Actions) | — | `05_apoio/001_ddl_create_tables.py`<br>`01_bronze/101_cvm_dfp_dre.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`06_testes/test_integracao_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`06_testes/test_integracao_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/203_cvm_dfp_bpp.py`<br>`06_testes/test_integracao_bpp.py` |
 | **CVM - Verificação Diária Landing Zone** | test | 770519249168919 | Diário 06:00 BRT | **PAUSED** | `05_apoio/004_verificacao_diaria_landing.py` |
 | **CVM - Pipeline Completo Semanal** | test | 684250943587739 | Segunda 07:00 BRT | **PAUSED** | `01_bronze/101_cvm_dfp_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`02_silver/203_cvm_dfp_bpp.py` |
-| **[test] Testes de Integração - Pipeline CVM** | test | 474378723473259 | Manual (GitHub Actions) | — | `05_apoio/001_ddl_create_tables.py`<br>`01_bronze/101_cvm_dfp_dre.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`06_testes/test_integracao_dre.py` |
+| **[test] Testes de Integração - Pipeline CVM** | test | 474378723473259 | Manual (GitHub Actions) | — | `05_apoio/001_ddl_create_tables.py`<br>`01_bronze/101_cvm_dfp_dre.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`06_testes/test_integracao_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`06_testes/test_integracao_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/203_cvm_dfp_bpp.py`<br>`06_testes/test_integracao_bpp.py` |
 
 ---
 
@@ -32,7 +32,9 @@
 | Silver | `203_cvm_dfp_bpp.py` | Transformação BPP |
 | Apoio | `001_ddl_create_tables.py` | DDL unificado (schemas + tabelas) |
 | Apoio | `004_verificacao_diaria_landing.py` | Download incremental CVM (HEAD + Last-Modified) |
-| Testes | `test_integracao_dre.py` | Validação E2E Bronze→Silver |
+| Testes | `test_integracao_dre.py` | Validação E2E DRE Bronze→Silver |
+| Testes | `test_integracao_bpa.py` | Validação E2E BPA Bronze→Silver |
+| Testes | `test_integracao_bpp.py` | Validação E2E BPP Bronze→Silver |
 
 ---
 
