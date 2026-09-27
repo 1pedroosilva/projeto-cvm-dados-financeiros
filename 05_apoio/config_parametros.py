@@ -402,6 +402,79 @@ def registrar_observabilidade_execucao(
         # Observabilidade não deve quebrar o pipeline
         print(f"⚠️  Erro ao registrar observabilidade: {e}")
 
+
+def registrar_guardrail(
+    id_execucao: str,
+    nome_guardrail: str,
+    tipo_check: str,
+    resultado: str,
+    etapa: str,
+    fonte: str,
+    ano=None,
+    esperado=None,
+    encontrado=None,
+    registros_afetados=None,
+    detalhes=None,
+):
+    """Registra resultado de guardrail na tabela observabilidade_guardrails.
+
+    INSERT em observabilidade_guardrails. FK para observabilidade_execucoes
+    via id_execucao (rastreabilidade completa).
+
+    Args:
+        id_execucao: UUID da execucao (gerado pelo notebook, nao pela funcao)
+        nome_guardrail: Nome descritivo do guardrail
+        tipo_check: Tipo do check (schema_check, empty_file, row_count, uniqueness, etc.)
+        resultado: PASS, FAIL, WARN
+        etapa: bronze, silver, gold
+        fonte: dre, bpa, bpp, etc.
+        ano: Ano validado (opcional)
+        esperado: Valor esperado (opcional)
+        encontrado: Valor encontrado (opcional)
+        registros_afetados: Registros que falharam (opcional)
+        detalhes: Mensagem adicional (opcional)
+    """
+    import uuid
+
+    def _sql_str(val):
+        if val is None:
+            return 'NULL'
+        return "'" + str(val).replace("'", "''") + "'"
+
+    id_check = str(uuid.uuid4())
+    notebook_path = None
+    try:
+        notebook_path = str(dbutils.notebook.getContext().notebookPath())
+    except Exception:
+        pass
+
+    try:
+        spark.sql(f"""
+            INSERT INTO {CATALOG_NAME}.{SCHEMA_APOIO}.observabilidade_guardrails
+                (id_check, id_execucao, notebook_path, etapa, fonte, ano,
+                 nome_guardrail, tipo_check, resultado,
+                 esperado, encontrado, registros_afetados, detalhes, ts_check)
+            VALUES (
+                {_sql_str(id_check)},
+                {_sql_str(id_execucao)},
+                {_sql_str(notebook_path)},
+                {_sql_str(etapa)},
+                {_sql_str(fonte)},
+                {ano if ano is not None else 'NULL'},
+                {_sql_str(nome_guardrail)},
+                {_sql_str(tipo_check)},
+                {_sql_str(resultado)},
+                {_sql_str(esperado)},
+                {_sql_str(encontrado)},
+                {registros_afetados if registros_afetados is not None else 'NULL'},
+                {_sql_str(detalhes)},
+                current_timestamp()
+            )
+        """)
+    except Exception as e:
+        # Observabilidade nao deve quebrar o pipeline
+        print(f"⚠️  Erro ao registrar guardrail: {e}")
+
 def get_url_arquivo_cvm(ano: int) -> str:
     """Constrói URL completa do arquivo ZIP DFP da CVM (contém todas demonstrações)."""
     return f"{CVM_BASE_URL}dfp_cia_aberta_{ano}.zip"

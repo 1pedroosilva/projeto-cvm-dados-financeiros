@@ -48,7 +48,7 @@ if not ANOS_PROCESSAR:
 import zipfile
 import io
 import pandas as pd
-from pyspark.sql.functions import current_timestamp, lit, year
+from pyspark.sql.functions import current_timestamp, lit, year, col
 import json
 import logging
 import time
@@ -112,7 +112,7 @@ def validar_prerequisitos(ano):
 # extrair_dados: Lê arquivo ZIP da Landing Zone e converte para pandas
 # Spark Connect compatível (usa pandas como intermediário para leitura de ZIP)
 
-def extrair_dados(ano):
+def extrair_dados(ano, id_execucao):
     """
     Extrai dados do arquivo ZIP para DataFrame pandas.
     Retorna DataFrame pandas com os dados brutos do CSV.
@@ -128,6 +128,20 @@ def extrair_dados(ano):
         with z.open(f"dfp_cia_aberta_BPP_con_{ano}.csv") as csv_file:
             df_pandas = pd.read_csv(csv_file, sep=";", encoding="ISO-8859-1")
     
+    # GUARDRAIL: Arquivo vazio
+    if len(df_pandas) == 0:
+        registrar_guardrail(
+            id_execucao=id_execucao,
+            nome_guardrail='arquivo_vazio',
+            tipo_check='empty_file',
+            resultado='FAIL',
+            etapa='bronze',
+            fonte='bpp',
+            ano=ano,
+            detalhes=f'Arquivo CSV vazio: dfp_cia_aberta_BPP_con_{ano}.csv'
+        )
+        raise ValueError(f"Arquivo CSV vazio: dfp_cia_aberta_BPP_con_{ano}.csv")
+    
     logger.info(f"[EXTRAÇÃO] Registros extraídos: {len(df_pandas):,}")
     return df_pandas
 
@@ -137,7 +151,7 @@ def extrair_dados(ano):
 # transformar_bronze: Converte pandas→Spark, valida schema e adiciona metadados técnicos
 # Aplica guardrail de validação de colunas essenciais (descarta extras automaticamente)
 
-def transformar_bronze(df_pandas, ano, versao_atual, last_modified_cvm):
+def transformar_bronze(df_pandas, ano, versao_atual, last_modified_cvm, id_execucao):
     """
     Transforma DataFrame pandas em DataFrame Spark Bronze com metadados técnicos.
     Retorna DataFrame Spark pronto para gravação.
@@ -154,11 +168,34 @@ def transformar_bronze(df_pandas, ano, versao_atual, last_modified_cvm):
     assert count_extraido == count_spark, f"❌ Perda na conversão: {count_extraido} → {count_spark}"
     
     logger.info(f"[GUARDRAIL] Validando schema e projetando colunas essenciais...")
-    df_validado = validar_e_projetar_schema(
-        df_raw,
-        COLUNAS_ESSENCIAIS_BPP,
-        f"BPP {ano}"
-    )
+    try:
+        df_validado = validar_e_projetar_schema(
+            df_raw,
+            COLUNAS_ESSENCIAIS_BPP,
+            f"BPP {ano}"
+        )
+        registrar_guardrail(
+            id_execucao=id_execucao,
+            nome_guardrail='schema_validation',
+            tipo_check='schema_check',
+            resultado='PASS',
+            etapa='bronze',
+            fonte='bpp',
+            ano=ano,
+            detalhes=f'Schema validado com {len(COLUNAS_ESSENCIAIS_BPP)} colunas essenciais'
+        )
+    except ValueError as schema_err:
+        registrar_guardrail(
+            id_execucao=id_execucao,
+            nome_guardrail='schema_validation',
+            tipo_check='schema_check',
+            resultado='FAIL',
+            etapa='bronze',
+            fonte='bpp',
+            ano=ano,
+            detalhes=str(schema_err)[:2000]
+        )
+        raise
     
     # RECONCILIAÇÃO: Validar que schema não rejeitou registros
     count_validado = df_validado.count()
@@ -252,6 +289,11 @@ def registrar_controle_falha(ano, erro):
 # Orquestração resiliente: try/except POR ano para isolamento de falhas
 # Se um ano falhar, os demais continuam sendo processados
 
+# ID unico da execucao (gerado no inicio do notebook, nao dentro de funcao)
+# Passado como parametro para registrar_guardrail()
+import uuid
+id_execucao = str(uuid.uuid4())
+
 anos_sucesso = []
 anos_falha = []
 
@@ -294,15 +336,50 @@ for ano in ANOS_PROCESSAR:
         logger.info(f"[METADADOS] Last-Modified CVM: {last_modified_cvm}")
         
         # 4. Extrair dados
-        df_pandas = extrair_dados(ano)
+        df_pandas = extrair_dados(ano, id_execucao)
         
         # 5. Transformar para Bronze
         df_bronze, count_registros = transformar_bronze(
-            df_pandas, ano, versao_atual, last_modified_cvm
+            df_pandas, ano, versao_atual, last_modified_cvm, id_execucao
         )
         
         # 6. Gravar Delta
         gravar_delta(df_bronze, ano, versao_atual)
+        
+        # GUARDRAIL: Reconciliacao de contagem
+        count_tabela = spark.table(f"{SCHEMA_BRONZE}.103_bpp_dfp") \
+            .filter(year(col("DT_REFER")) == ano) \
+            .filter(col("_versao_ingestao") == versao_atual) \
+            .count()
+
+        if count_tabela != count_registros:
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='reconciliacao_contagem',
+                tipo_check='row_count',
+                resultado='FAIL',
+                etapa='bronze',
+                fonte='bpp',
+                ano=ano,
+                esperado=str(count_registros),
+                encontrado=str(count_tabela),
+                registros_afetados=abs(count_registros - count_tabela),
+                detalhes=f'Divergencia: gravados={count_registros}, tabela={count_tabela}'
+            )
+            raise ValueError(f"Reconciliacao falhou: gravados={count_registros}, tabela={count_tabela}")
+        else:
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='reconciliacao_contagem',
+                tipo_check='row_count',
+                resultado='PASS',
+                etapa='bronze',
+                fonte='bpp',
+                ano=ano,
+                esperado=str(count_registros),
+                encontrado=str(count_tabela),
+                detalhes=f'Contagem reconciliada: {count_registros} registros'
+            )
         
         # 7. Registrar controle de sucesso
         registrar_controle_sucesso(ano, last_modified_cvm, versao_atual)

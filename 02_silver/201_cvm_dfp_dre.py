@@ -96,6 +96,11 @@ logger.info("="*80)
 # Orquestração resiliente: try/except POR ano para isolamento de falhas
 # Se um ano falhar, os demais continuam sendo processados
 
+# ID unico da execucao (gerado no inicio do notebook, nao dentro de funcao)
+# Passado como parametro para registrar_guardrail()
+import uuid
+id_execucao = str(uuid.uuid4())
+
 anos_sucesso = []
 anos_falha = []
 
@@ -115,8 +120,33 @@ for ano in ANOS_PROCESSAR:
         # GUARDRAIL: Verificar se Bronze tem dados reais para este ano
         count_bronze = df_bronze.count()
         if count_bronze == 0:
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='bronze_vazia',
+                tipo_check='empty_table',
+                resultado='SKIP',
+                etapa='silver',
+                fonte='dre',
+                ano=ano,
+                esperado='>0',
+                encontrado='0',
+                detalhes=f'Bronze vazia para ano {ano}'
+            )
             logger.warning(f"[SKIP] Bronze vazia para ano {ano} - pulando sem marcar SUCCESS")
             continue
+
+        registrar_guardrail(
+            id_execucao=id_execucao,
+            nome_guardrail='bronze_vazia',
+            tipo_check='empty_table',
+            resultado='PASS',
+            etapa='silver',
+            fonte='dre',
+            ano=ano,
+            esperado='>0',
+            encontrado=str(count_bronze),
+            detalhes=f'Bronze com {count_bronze} registros para ano {ano}'
+        )
 
         window_spec = Window.partitionBy(
             "CNPJ_CIA", "DT_REFER", "CD_CONTA", "ORDEM_EXERC"
@@ -125,6 +155,37 @@ for ano in ANOS_PROCESSAR:
         df_versao_atual = df_bronze.withColumn(
             "_row_num", row_number().over(window_spec)
         ).filter(col("_row_num") == 1).drop("_row_num")
+
+        # GUARDRAIL: Unicidade da chave de negocio
+        chave_negocio = ["CNPJ_CIA", "DT_REFER", "VERSAO", "CD_CONTA", "GRUPO_DFP", "ORDEM_EXERC"]
+        df_duplicatas = df_versao_atual.groupBy(*chave_negocio).count().filter("count > 1")
+        count_duplicatas = df_duplicatas.count()
+
+        if count_duplicatas > 0:
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='unicidade_chave_negocio',
+                tipo_check='uniqueness',
+                resultado='FAIL',
+                etapa='silver',
+                fonte='dre',
+                ano=ano,
+                registros_afetados=count_duplicatas,
+                detalhes=f'{count_duplicatas} chaves duplicadas em ({", ".join(chave_negocio)})'
+            )
+            raise ValueError(f"Unicidade violada: {count_duplicatas} chaves duplicadas")
+        else:
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='unicidade_chave_negocio',
+                tipo_check='uniqueness',
+                resultado='PASS',
+                etapa='silver',
+                fonte='dre',
+                ano=ano,
+                registros_afetados=0,
+                detalhes=f'Chave unica em ({", ".join(chave_negocio)})'
+            )
 
         # ETAPA 2: Transformações (padronização, limpeza, enriquecimento)
         logger.info("[2/4] Aplicando transformações...")

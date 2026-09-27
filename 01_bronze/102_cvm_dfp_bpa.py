@@ -48,7 +48,7 @@ if not ANOS_PROCESSAR:
 import zipfile
 import io
 import pandas as pd
-from pyspark.sql.functions import current_timestamp, lit, year
+from pyspark.sql.functions import current_timestamp, lit, year, col
 import json
 import logging
 import time
@@ -79,6 +79,11 @@ logger.info("="*80)
 # DBTITLE 1,ORQUESTRAÇÃO RESILIENTE
 # Loop: Processar cada ano da lista ANOS_PROCESSAR
 # Lê arquivo ZIP da Landing Zone (já baixado por 004_verificacao_diaria_landing)
+
+# ID unico da execucao (gerado no inicio do notebook, nao dentro de funcao)
+# Passado como parametro para registrar_guardrail()
+import uuid
+id_execucao = str(uuid.uuid4())
 
 # Rastreamento de sucesso/falha
 anos_sucesso = []
@@ -142,7 +147,21 @@ for ano in ANOS_PROCESSAR:
         with zipfile.ZipFile(zip_bytes) as z:
             with z.open(f"dfp_cia_aberta_BPA_con_{ano}.csv") as csv_file:
                 df_pandas = pd.read_csv(csv_file, sep=";", encoding="ISO-8859-1")
-        
+
+        # GUARDRAIL: Arquivo vazio
+        if len(df_pandas) == 0:
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='arquivo_vazio',
+                tipo_check='empty_file',
+                resultado='FAIL',
+                etapa='bronze',
+                fonte='bpa',
+                ano=ano,
+                detalhes=f'Arquivo CSV vazio: dfp_cia_aberta_BPA_con_{ano}.csv'
+            )
+            raise ValueError(f"Arquivo CSV vazio: dfp_cia_aberta_BPA_con_{ano}.csv")
+
         # RECONCILIAÇÃO: Contagem inicial
         count_extraido = len(df_pandas)
         logger.info(f"[EXTRAÇÃO] Registros extraídos: {count_extraido:,}")
@@ -156,11 +175,34 @@ for ano in ANOS_PROCESSAR:
         assert count_extraido == count_spark, f"❌ Perda na conversão: {count_extraido} → {count_spark}"
 
         # GUARDRAIL DE VALIDAÇÃO DE SCHEMA
-        df_validado = validar_e_projetar_schema(
-            df_raw,
-            COLUNAS_ESSENCIAIS_BPA,
-            f"BPA {ano}"
-        )
+        try:
+            df_validado = validar_e_projetar_schema(
+                df_raw,
+                COLUNAS_ESSENCIAIS_BPA,
+                f"BPA {ano}"
+            )
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='schema_validation',
+                tipo_check='schema_check',
+                resultado='PASS',
+                etapa='bronze',
+                fonte='bpa',
+                ano=ano,
+                detalhes=f'Schema validado com {len(COLUNAS_ESSENCIAIS_BPA)} colunas essenciais'
+            )
+        except ValueError as schema_err:
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='schema_validation',
+                tipo_check='schema_check',
+                resultado='FAIL',
+                etapa='bronze',
+                fonte='bpa',
+                ano=ano,
+                detalhes=str(schema_err)[:2000]
+            )
+            raise
 
         # RECONCILIAÇÃO: Validar que schema não rejeitou registros
         count_validado = df_validado.count()
@@ -185,6 +227,41 @@ for ano in ANOS_PROCESSAR:
             .format("delta") \
             .mode("append") \
             .saveAsTable(f"{SCHEMA_BRONZE}.102_bpa_dfp")
+
+        # GUARDRAIL: Reconciliacao de contagem
+        count_tabela = spark.table(f"{SCHEMA_BRONZE}.102_bpa_dfp") \
+            .filter(year(col("DT_REFER")) == ano) \
+            .filter(col("_versao_ingestao") == versao_atual) \
+            .count()
+
+        if count_tabela != count_gravar:
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='reconciliacao_contagem',
+                tipo_check='row_count',
+                resultado='FAIL',
+                etapa='bronze',
+                fonte='bpa',
+                ano=ano,
+                esperado=str(count_gravar),
+                encontrado=str(count_tabela),
+                registros_afetados=abs(count_gravar - count_tabela),
+                detalhes=f'Divergencia: gravados={count_gravar}, tabela={count_tabela}'
+            )
+            raise ValueError(f"Reconciliacao falhou: gravados={count_gravar}, tabela={count_tabela}")
+        else:
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='reconciliacao_contagem',
+                tipo_check='row_count',
+                resultado='PASS',
+                etapa='bronze',
+                fonte='bpa',
+                ano=ano,
+                esperado=str(count_gravar),
+                encontrado=str(count_tabela),
+                detalhes=f'Contagem reconciliada: {count_gravar} registros'
+            )
 
         logger.info(f"[GRAVAÇÃO] ✓ Ano {ano} gravado com sucesso (versão {versao_atual})")
 

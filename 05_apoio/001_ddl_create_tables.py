@@ -352,7 +352,7 @@ print(f"✅ Tabela {SCHEMA_SILVER}.202_bpa_dfp criada")
 
 # COMMAND ----------
 
-# DBTITLE 1,CRIAÇÃO DA TABELA DE OBSERVABILIDADE
+# DBTITLE 1,CRIACAO DA TABELA DE OBSERVABILIDADE
 # ============================================================================
 # TABELA DE OBSERVABILIDADE (schema de apoio)
 # ============================================================================
@@ -441,3 +441,32 @@ COMMENT 'Controle de ingestão - Rastreia quando cada fonte/ano foi processado e
 """)
 
 print(f"✅ Tabela {SCHEMA_APOIO}.controle_ingestao criada")
+
+# ============================================================================
+# TABELA DE OBSERVABILIDADE - GUARDRAILS (schema de apoio)
+# ============================================================================
+# Rastreia validacoes de qualidade de dados (uma linha por check executado)
+# Alimentada por notebooks bronze/silver via registrar_guardrail()
+
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.observabilidade_guardrails (
+  id_check STRING COMMENT 'UUID unico por check',
+  id_execucao STRING COMMENT 'FK para observabilidade_execucoes.id_execucao',
+  notebook_path STRING COMMENT 'Notebook que executou o check',
+  etapa STRING COMMENT 'bronze, silver, gold',
+  fonte STRING COMMENT 'dre, bpa, bpp, etc.',
+  ano INT COMMENT 'Ano validado',
+  nome_guardrail STRING COMMENT 'Nome descritivo do guardrail',
+  tipo_check STRING COMMENT 'schema_check, row_count, uniqueness, empty_file, empty_table, reconciliation',
+  resultado STRING COMMENT 'PASS, FAIL, WARN',
+  esperado STRING COMMENT 'Valor esperado',
+  encontrado STRING COMMENT 'Valor encontrado',
+  registros_afetados BIGINT COMMENT 'Registros que falharam a validacao',
+  detalhes STRING COMMENT 'Mensagem adicional',
+  ts_check TIMESTAMP COMMENT 'Momento do check'
+)
+USING DELTA
+COMMENT 'Observabilidade - rastreia validacoes de qualidade de dados do pipeline CVM'
+""")
+
+print(f"✅ Tabela {SCHEMA_APOIO}.observabilidade_guardrails criada")
