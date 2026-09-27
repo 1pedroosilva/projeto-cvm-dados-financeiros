@@ -619,23 +619,261 @@ df_resultado = spark.sql("""
 
 ## Monitoramento
 
-### Observabilidade de Execução (controle_ingestao)
+### Arquitetura de Observabilidade (4 Camadas, 4 Tabelas)
 
-Todos os 6 notebooks (101-103 Bronze, 201-203 Silver) registram na tabela `{SCHEMA_APOIO}.controle_ingestao`:
-* **Status**: `SUCCESS` ou `FAILED` por ano processado
-* **Timestamp**: `ingest_ts` de cada execução
-* **Duração**: Logada via `time.time()` (em logs do notebook, não persistida na tabela)
-* **Row count**: Logado via `df_silver.count()` (em logs do notebook, não persistido na tabela)
-* **Isolamento de falhas**: `try/except` por ano — erro em 1 ano não derruba os demais
-* **Relatório final**: `anos_sucesso`/`anos_falha` + `raise RuntimeError` se houve falha
+O pipeline implementa observabilidade estruturada em 4 camadas, cada uma com granularidade e responsabilidade distintas:
 
-> **Tabela `observabilidade_execucoes`** (26 colunas): Já existe no DDL 001 mas NENHUM notebook a popula. Planejada para o Grupo B (evolução de métricas): adicionar `registros_processados`, `duracao_segundos`, `tipo_erro` persistidos.
+| Camada | Tabela | Granularidade | Escrita por |
+| --- | --- | --- | --- |
+| **Orquestração** | `observabilidade_jobs` | 1 linha por run de job | Todos os notebooks via `registrar_observabilidade_job()` (MERGE) |
+| **Execução** | `observabilidade_execucoes` | 1 linha por task/notebook | Todos os notebooks via `registrar_observabilidade_execucao()` |
+| **Qualidade** | `observabilidade_guardrails` | 1 linha por execução de guardrail | Notebooks bronze/silver/gold nos pontos de validação |
+| **Ingestão** | `controle_ingestao` | 1 linha por arquivo verificado/ingerido | Bronze (101/102/103) + 004 (verificação diária) |
+
+#### Tabela 1: `observabilidade_jobs` (camada de orquestração)
+
+Rastreia execuções de jobs (uma linha por run). Populated via MERGE idempotente — cada notebook atualiza o registro do run ao qual pertence.
+
+**Estrutura**:
+```sql
+CREATE TABLE {SCHEMA_APOIO}.observabilidade_jobs (
+    id_run           STRING,      -- UUID único por run (determinístico via uuid5)
+    job_id           BIGINT,      -- ID do job no Databricks
+    job_name         STRING,      -- Nome do job
+    run_id           BIGINT,      -- ID do run
+    trigger_type     STRING,      -- SCHEDULED, ONE_TIME, etc.
+    inicio_ts        TIMESTAMP,   -- Início do run (primeira task)
+    fim_ts           TIMESTAMP,   -- Fim do run (última task)
+    duracao_segundos DOUBLE,      -- Wall-clock total (inclui gaps)
+    status           STRING,      -- SUCCESS, ERROR, PARTIAL
+    created_at       TIMESTAMP    -- Timestamp de criação do registro
+);
+```
+
+**MERGE idempotente**:
+* `inicio_ts = LEAST(t.inicio_ts, source.inicio_ts)` — primeira task estabelece
+* `fim_ts = GREATEST(t.fim_ts, source.fim_ts)` — última task atualiza
+* `status` monotônico: uma vez ERROR, sempre ERROR (sem race condition)
+* Contadores (`total_tasks`, `tasks_sucesso`) derivados via `COUNT(DISTINCT task_key)` de `observabilidade_execucoes` (não persistidos)
+
+#### Tabela 2: `observabilidade_execucoes` (camada de execução)
+
+Rastreia execuções de notebooks/tasks (uma linha por execução).
+
+**Estrutura** (~19 colunas):
+```sql
+CREATE TABLE {SCHEMA_APOIO}.observabilidade_execucoes (
+    id_execucao          STRING,    -- UUID único
+    id_run               STRING,    -- FK → observabilidade_jobs.id_run
+    job_id               BIGINT,    -- Contexto do job
+    job_name             STRING,    -- Nome do job
+    run_id               BIGINT,    -- Contexto do run
+    task_key             STRING,    -- Chave da task
+    notebook_path        STRING,    -- Caminho do notebook
+    etapa                STRING,    -- bronze, silver, gold, verificacao
+    fonte                STRING,    -- dre, bpa, bpp, landing, etc.
+    ano                  INT,       -- Ano processado
+    trigger_type         STRING,    -- SCHEDULED, ONE_TIME, etc.
+    inicio_ts            TIMESTAMP, -- Início da execução
+    fim_ts               TIMESTAMP, -- Fim da execução
+    duracao_segundos     DOUBLE,    -- Duração
+    status               STRING,    -- SUCCESS, ERROR, SKIPPED, PARTIAL
+    registros_processados BIGINT,   -- Registros lidos/escritos
+    tipo_erro            STRING,    -- Tipo do erro
+    mensagem_erro        STRING,    -- Mensagem (até 2000 chars)
+    created_at           TIMESTAMP  -- Timestamp de criação
+);
+```
+
+**Características**:
+* Sem colunas de landing (`arquivos_*`, `bytes_*`) — movidas para `controle_ingestao`
+* FK para `observabilidade_jobs` via `id_run` (permite drill-down sem JOIN complexo)
+* Captura contexto de job via `dbutils.jobs.getContext()` com fallback em 3 camadas
+
+#### Tabela 3: `observabilidade_guardrails` (camada de qualidade)
+
+Rastreia validações de qualidade de dados (uma linha por check executado).
+
+**Estrutura**:
+```sql
+CREATE TABLE {SCHEMA_APOIO}.observabilidade_guardrails (
+    id_check            STRING,    -- UUID único por check
+    id_execucao         STRING,    -- FK → observabilidade_execucoes.id_execucao
+    notebook_path       STRING,    -- Notebook que executou o check
+    etapa               STRING,    -- bronze, silver, gold
+    fonte               STRING,    -- dre, bpa, bpp, etc.
+    ano                 INT,       -- Ano validado
+    nome_guardrail      STRING,    -- Nome descritivo do guardrail
+    tipo_check          STRING,    -- null_check, schema_check, row_count, uniqueness, range, reconciliation
+    resultado           STRING,    -- PASS, FAIL, WARN
+    esperado            STRING,    -- Valor esperado
+    encontrado          STRING,    -- Valor encontrado
+    registros_afetados  BIGINT,    -- Registros que falharam a validação
+    detalhes            STRING,    -- Mensagem adicional
+    ts_check            TIMESTAMP  -- Momento do check
+);
+```
+
+#### Guardrails Implementados
+
+O pipeline implementa 5 guardrails que gravam resultados em `observabilidade_guardrails` via `registrar_guardrail()`:
+
+**Bronze (101/102/103)**:
+1. **Schema Validation** (`tipo_check='schema_check'`)
+   - Valida schema esperado do CSV antes do APPEND
+   - `resultado='FAIL'` → raise, protege Bronze de schema corrupto
+   - Já implementado
+
+2. **Arquivo Vazio** (`tipo_check='empty_file'`)
+   - Valida `len(df_pandas) > 0` após leitura do CSV
+   - `resultado='FAIL'` → raise, protege Bronze de arquivo vazio
+   - A implementar
+
+3. **Reconciliação de Contagem** (`tipo_check='row_count'`)
+   - Compara `df_bronze.count()` antes do APPEND com `spark.table().count()` depois
+   - `esperado` = count do DataFrame, `encontrado` = count na tabela
+   - `resultado='FAIL'` se divergem → raise, detecta falha de gravação
+   - A implementar
+
+**Silver (201/202/203)**:
+4. **Bronze Vazia** (`tipo_check='empty_table'`)
+   - Valida que Bronze tem dados antes de processar Silver
+   - `resultado='FAIL'` → raise, protege Silver de processar vazio
+   - Já implementado
+
+5. **Unicidade de Chave de Negócio** (`tipo_check='uniqueness'`)
+   - Valida unicidade de `(CNPJ_CIA, DT_REFER, VERSAO, CD_CONTA, GRUPO_DFP, ORDEM_EXERC)`
+   - Executado após filtro de versionamento (Window Function), antes do REPLACE WHERE
+   - `registros_afetados` = count de duplicatas encontradas
+   - `resultado='FAIL'` se duplicatas > 0 → raise, protege Silver de chave duplicada
+   - A implementar
+
+**Características**:
+* Todos executados ANTES de modificar dados (pré-condição)
+* Todos registram resultado via `registrar_guardrail(id_execucao, ...)`
+* FK para `observabilidade_execucoes` via `id_execucao` (rastreabilidade completa)
+* Falha (`resultado='FAIL'`) → raise, interrompe processamento
+
+#### Tabela 4: `controle_ingestao` (camada de ingestão)
+
+Rastreia arquivos verificados/ingeridos (uma linha por arquivo/ano).
+
+**Estrutura** (enriquecida com `bytes_arquivo` e `status='SKIPPED'`):
+```sql
+CREATE TABLE {SCHEMA_APOIO}.controle_ingestao (
+    fonte               STRING,    -- dre, bpa, bpp, landing_verificacao
+    ano                 INT,       -- Ano fiscal
+    arquivo             STRING,    -- Nome do arquivo
+    last_modified_cvm   TIMESTAMP, -- Last-Modified na CVM
+    versao_ingestao     INT,       -- Versão sequencial
+    ingest_ts           TIMESTAMP, -- Timestamp da ingestão
+    status              STRING,    -- SUCCESS (baixado), SKIPPED (já atualizado), ERROR
+    mensagem            STRING,    -- Erro ou observação
+    bytes_arquivo       BIGINT     -- Tamanho do arquivo baixado (NULL se não baixado)
+);
+```
+
+**Escrita**:
+* Bronze (101/102/103): uma linha por arquivo ingerido (`status='SUCCESS'`)
+* 004 (verificação diária): uma linha por arquivo verificado (`status='SUCCESS'` se baixou, `'SKIPPED'` se já atualizado)
+
+### Fluxo de Escrita e Funções Centralizadas
+
+Todas as escritas nas tabelas de observabilidade são feitas via funções centralizadas em `05_apoio/config_parametros.py`.
+
+#### Ordem de Chamadas em Notebooks
+
+```python
+import uuid
+import time
+
+# Início do notebook
+id_execucao = str(uuid.uuid4())  # Gerado pelo notebook, não pela função
+inicio = time.time()
+
+try:
+    # 1. Guardrails (pré-processamento) — usa id_execucao
+    registrar_guardrail(
+        id_execucao=id_execucao,
+        nome_guardrail='schema_validation',
+        tipo_check='schema_check',
+        resultado='PASS',
+        ...
+    )
+    
+    # 2. Processamento (transformações, gravações)
+    # ...
+    
+    # 3. Registro de execução (task/notebook level) — recebe id_execucao
+    registrar_observabilidade_execucao(
+        id_execucao=id_execucao,
+        etapa='bronze',
+        fonte='dre',
+        ano=2021,
+        status='SUCCESS',
+        registros_processados=df_bronze.count(),
+        ...
+    )
+    
+    # 4. MERGE no job (run level) — idempotente
+    registrar_observabilidade_job(
+        job_id=job_id,
+        run_id=run_id,
+        job_name=job_name,
+        trigger_type=trigger_type,
+        inicio_ts=inicio_ts,
+        fim_ts=datetime.now(),
+        status='SUCCESS',
+        id_run=id_run  # UUID determinístico via uuid5(job_id + run_id)
+    )
+    
+except Exception as e:
+    # Registrar erro na execução
+    registrar_observabilidade_execucao(
+        id_execucao=id_execucao,
+        status='ERROR',
+        tipo_erro=type(e).__name__,
+        mensagem_erro=str(e)[:2000],
+        ...
+    )
+    # MERGE com status ERROR
+    registrar_observabilidade_job(..., status='ERROR')
+    raise
+```
+
+#### Funções Centralizadas (`config_parametros.py`)
+
+**1. `registrar_observabilidade_execucao(id_execucao, ...)`**
+* Recebe `id_execucao` gerado pelo notebook (não gera internamente)
+* Captura `job_name`, `trigger_type`, `notebook_path` via `dbutils.jobs.getContext()` com fallback em 3 camadas:
+  1. `dbutils.notebook.getContext()`
+  2. `__file__`
+  3. Constante passada pelo notebook (safety net)
+* INSERT em `observabilidade_execucoes`
+
+**2. `registrar_observabilidade_job(job_id, run_id, ...)`**
+* MERGE idempotente em `observabilidade_jobs`
+* `id_run` determinístico: `str(uuid.uuid5(uuid.NAMESPACE_URL, f'{job_id}-{run_id}'))`
+* Atualiza `inicio_ts` (LEAST), `fim_ts` (GREATEST), `status` (monotônico)
+
+**3. `registrar_guardrail(id_execucao, ...)`**
+* INSERT em `observabilidade_guardrails`
+* FK para `observabilidade_execucoes` via `id_execucao`
+
+**4. `registrar_ingestao_landing(fonte, ano, arquivo, ...)`**
+* INSERT em `controle_ingestao`
+* Usado por Bronze (101/102/103) e 004 (verificação diária)
+
+#### Migração de Estado Atual
+
+Antes da implementação das 4 tabelas, a `observabilidade_execucoes` continha colunas de landing (`arquivos_*`, `bytes_*`) que serão removidas. Registros históricos do 004 que popularam essas colunas serão migrados para `controle_ingestao` antes do `ALTER TABLE DROP COLUMNS`, preservando o histórico de verificações.
 
 ### Monitoramento de Infraestrutura
 
 * **Job Runs**: Histórico de execuções disponível no Databricks
 * **Delta History**: Auditoria de mudanças nas tabelas
 * **Logs**: Logs estruturados via `logging.basicConfig` (timestamp, nível, mensagem)
+* **System Tables**: `system.lakeflow.job_run_timeline` disponível mas não usado como pilar (observabilidade própria via instrumentação)
 
 ## Deploy e Infraestrutura
 
@@ -668,8 +906,57 @@ Todos os nomes de catalogo, schema, tabela e volume sao derivados de `ambientes.
 
 **DDL unificado**: O notebook `001_ddl_create_tables.py` cria todos os schemas e tabelas do projeto em uma unica passagem idempotente, incluindo `controle_ingestao`. Antes, essa tabela era criada apenas no `002_ddl_controle_ingestao.py`; sem ela, a primeira execucao do orquestrador em schema novo quebrava (`get_novos_anos_para_processar` faz SELECT na tabela). O 002 permanece como validacao idempotente.
 
-## Próximas Evoluções Técnicas
+## Sequência de Implementação até Gold
 
-1. **Data Quality**: Validações automáticas com Great Expectations
-2. **Particionamento**: Particionamento por ano para performance
-3. **Otimização**: Z-ordering para queries frequentes
+A evolução do pipeline segue 4 passos sequenciais com dependências explícitas:
+
+### Passo 1: Guardrails
+
+**Escopo**:
+* DDL da tabela `observabilidade_guardrails`
+* Função `registrar_guardrail()` em `config_parametros.py`
+* Implementação dos 3 novos guardrails:
+  - Arquivo vazio (Bronze)
+  - Reconciliação de contagem (Bronze)
+  - Unicidade de chave de negócio (Silver)
+* Instrumentação dos 2 guardrails existentes para gravar em `observabilidade_guardrails`
+
+**Dependência**: Início do Passo 2 (DDL + função) executado primeiro, porque os guardrails novos gravam na tabela desde o primeiro dia.
+
+### Passo 2: Observabilidade
+
+**Escopo**:
+* DDLs das outras 3 tabelas (`observabilidade_jobs`, `observabilidade_execucoes`, `controle_ingestao` enriquecido)
+* Funções centralizadas:
+  - `registrar_observabilidade_execucao()`
+  - `registrar_observabilidade_job()`
+  - `registrar_ingestao_landing()`
+* Reestruturação do 004 para escrever em `controle_ingestao`
+* MERGE idempotente em `observabilidade_jobs`
+* Migração de dados históricos (004 → `controle_ingestao`)
+* `ALTER TABLE DROP COLUMNS` em `observabilidade_execucoes`
+* Painel de 4 páginas (Orquestração, Execução, Qualidade, Ingestão)
+
+**Dependência**: Passo 1 concluído (guardrails já gravam na tabela de qualidade).
+
+### Passo 3: Testes
+
+**Escopo**:
+* Cobertura pytest dos 5 guardrails
+* Cobertura pytest das 4 funções de observabilidade
+* Testes de integração (MERGE idempotente, FK, migração)
+* Ajuste do CI (GitHub Actions) para rodar nova suite de testes
+
+**Dependência**: Passo 2 concluído (observabilidade instrumentada e guard rails implementados).
+
+### Passo 4: Gold
+
+**Escopo**:
+* Notebook(s) de agregação (KPIs, métricas de negócio)
+* Tabela(s) `{SCHEMA_GOLD}.3XX_*`
+* Guardrails específicos de Gold (se aplicável)
+* Painel de consumo (opcional, pode usar DBSQL + dashboards existentes)
+
+**Dependência**: Passo 3 concluído (observabilidade e guardrails testados e estáveis).
+
+**Observação sobre Passo 1**: A DDL de `observabilidade_guardrails` e a função `registrar_guardrail()` tecnicamente pertencem ao Passo 2 (observabilidade), mas são executadas no início do Passo 1 porque os guardrails novos dependem dessa infraestrutura desde o primeiro commit. A fronteira é permeável por necessidade técnica, não por design.
