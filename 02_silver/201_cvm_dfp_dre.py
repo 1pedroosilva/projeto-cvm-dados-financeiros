@@ -18,7 +18,10 @@
 # MAGIC * **Enriquecimento**: adição de colunas calculadas, categorizações
 # MAGIC * **Guardrail**: Bronze vazia para o ano → SKIP (não marca SUCCESS, evita estado irrecuperável)
 # MAGIC * **Detecção**: anos pendentes via `inicializar_anos_processar()` (sem HTTP para CVM)
-# MAGIC * **Idempotência**: controle + verificação de dados reais na tabela destino + detecção de republicações via `_metadata.json`
+# MAGIC * **Bifurcação por CARGA**: `completa` (ignora idempotência, reprocessa) vs `incremental` (idempotência via `controle_ingestao`)
+# MAGIC * **Idempotência**: verificação em `controle_ingestao` por `fonte` + `ano` + `last_modified_cvm` + `status=SUCCESS` (ler de `_metadata.json`)
+# MAGIC * **Guardrails**: Bronze vazia → SKIP; unicidade da chave de negócio (`CNPJ_CIA`, `DT_REFER`, `VERSAO`, `CD_CONTA`, `GRUPO_DFP`, `ORDEM_EXERC`) → PARA
+# MAGIC * **Observabilidade**: `registrar_observabilidade_execucao()` registra sucesso/falha por ano
 # MAGIC * **Processamento resiliente**: try/except por ano (falha isolada não interrompe demais)
 # MAGIC
 # MAGIC ## Normalização de Escala Monetária
@@ -31,20 +34,22 @@
 # MAGIC ## Enriquecimento Hierárquico de Contas
 # MAGIC A CVM publica contas contábeis em estrutura hierárquica por notação de pontos (`CD_CONTA`): `3` → `3.01` → `3.01.01` → `3.01.01.01` (até 5 níveis). A Silver deriva 4 colunas dessa estrutura:
 # MAGIC
-# MAGIC * **`ST_CONTA_FIXA`**: Projetada da Bronze (S = conta fixa da estrutura CVM, N = detalhamento específico por empresa). Antes descartada na projeção Silver, agora preservada
+# MAGIC * **`ST_CONTA_FIXA`**: Projetada da Bronze (S = conta fixa da estrutura CVM, N = detalhamento específico por empresa)
 # MAGIC * **`NIVEL_CONTA`**: Nível hierárquico, derivado via `size(split(CD_CONTA, "[.]"))` (1 a 5)
 # MAGIC * **`CD_CONTA_PAI`**: Conta pai na hierarquia — tudo antes do último `.` (NULL para nível 1)
 # MAGIC * **`CD_CONTA_RAIZ`**: Conta raiz — primeiro segmento antes do primeiro `.` (ex: `3.01.01` → `3`)
+# MAGIC * **`TIPO_CONTA`**: `TOTALIZADORA` (até 2 níveis) ou `ANALITICA` (3+ níveis)
+# MAGIC * **`TIPO_ESTRUTURAL`**: `DERIVADA` para contas específicas (`3.02`, `3.03`, `3.05`, `3.07`, `3.09`, `3.10`), `ADITIVA` para demais (NULL acima de 2 níveis)
 # MAGIC
 # MAGIC **Rollup**: o valor do pai é a soma dos filhos diretos. Dashboards devem filtrar por `NIVEL_CONTA` para evitar double-counting (somar todos os registros soma pais + filhos, inflando o total).
 # MAGIC
-# MAGIC ## Entrada
-# MAGIC * **Tabela Bronze**: definida por SCHEMA_BRONZE no config_parametros
-# MAGIC * Dados brutos conforme extraídos da CVM
+# MAGIC ## Estratégia de Gravação
+# MAGIC **REPLACE WHERE**: Substituição atômica por período (`ANO = {ano}`) — Delta Lake garante operação all-or-nothing, eliminando janela de vulnerabilidade
 # MAGIC
-# MAGIC ## Saída
-# MAGIC * **Tabela Silver**: definida por SCHEMA_SILVER no config_parametros
-# MAGIC * Dados limpos, padronizados e prontos para análise e agregações
+# MAGIC ## Fontes
+# MAGIC * **Origem**: `{SCHEMA_BRONZE}.101_dre_dfp` — dados brutos ingeridos da CVM (notebook 101_cvm_dfp_dre)
+# MAGIC * **Metadados**: `_metadata.json` da Landing Zone (`{VOLUME_LANDING_DFP}/{ano}/`) — `last_modified_cvm` para idempotência
+# MAGIC * **Destino**: `{SCHEMA_SILVER}.201_dre_dfp` — dados limpos, padronizados e prontos para análise
 
 # COMMAND ----------
 
@@ -111,6 +116,28 @@ for ano in ANOS_PROCESSAR:
     logger.info("="*80)
     
     try:
+        # Ler last_modified_cvm do _metadata.json para check de idempotência
+        metadata_path = f"{VOLUME_LANDING_DFP}/{ano}/_metadata.json"
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+        last_modified_cvm = metadata.get('last_modified_cvm')
+
+        # IDEMPOTÊNCIA (CARGA=incremental): skip se Bronze não mudou
+        if CARGA != "completa":
+            ja_processado = spark.sql(f"""
+                SELECT COUNT(*) as count
+                FROM {SCHEMA_APOIO}.controle_ingestao
+                WHERE fonte = 'dre_silver'
+                  AND ano = {ano}
+                  AND last_modified_cvm = '{last_modified_cvm}'
+                  AND status = 'SUCCESS'
+            """).collect()[0]['count']
+            
+            if ja_processado > 0:
+                logger.info(f"⏭️  [SKIP] Ano {ano} já processado para esta versão CVM")
+                anos_sucesso.append(ano)
+                continue
+
         # ETAPA 1: Filtro de versionamento (Window Function)
         logger.info("[1/4] Aplicando filtro de versionamento...")
 
@@ -281,7 +308,7 @@ for ano in ANOS_PROCESSAR:
                 'dre_silver',
                 {ano},
                 '{SCHEMA_SILVER}.201_dre_dfp',
-                NULL,
+                '{last_modified_cvm}',
                 1,
                 current_timestamp(),
                 'SUCCESS',

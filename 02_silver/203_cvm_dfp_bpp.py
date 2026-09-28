@@ -18,15 +18,20 @@
 # MAGIC * **Enriquecimento**: cálculo de colunas derivadas úteis para análises
 # MAGIC * **Guardrail**: Bronze vazia para o ano → SKIP (não marca SUCCESS, evita estado irrecuperável)
 # MAGIC * **Detecção**: anos pendentes via `inicializar_anos_processar()` (sem HTTP para CVM)
-# MAGIC * **Idempotência**: controle + verificação de dados reais na tabela destino + detecção de republicações via `_metadata.json`
+# MAGIC * **Bifurcação por CARGA**: `completa` (ignora idempotência, reprocessa) vs `incremental` (idempotência via `controle_ingestao`)
+# MAGIC * **Idempotência**: verificação em `controle_ingestao` por `fonte` + `ano` + `last_modified_cvm` + `status=SUCCESS` (ler de `_metadata.json`)
+# MAGIC * **Guardrails**: Bronze vazia → SKIP; unicidade da chave de negócio (`CNPJ_CIA`, `DT_REFER`, `VERSAO`, `CD_CONTA`, `GRUPO_DFP`, `ORDEM_EXERC`) → PARA
+# MAGIC * **Observabilidade**: `registrar_observabilidade_execucao()` registra sucesso/falha por ano
 # MAGIC * **Processamento resiliente**: try/except por ano (falha isolada não interrompe demais)
 # MAGIC
 # MAGIC ## Transformações Aplicadas
-# MAGIC 1. **Filtro de versionamento**: Window Function (PARTITION BY chave natural, ORDER BY _versao_ingestao DESC)
-# MAGIC 2. **Conversão de tipos**: Datas (date), valores numéricos (double)
-# MAGIC 3. **Remoção de duplicados**: Distinct de registros idênticos
-# MAGIC 4. **Tratamento de nulls**: Remoção de registros com campos obrigatórios nulos
-# MAGIC 5. **Colunas calculadas**: Ano, trimestre, mês extraídos de DT_REFER
+# MAGIC 1. **Filtro de versionamento**: Window Function (PARTITION BY `CNPJ_CIA`, `DT_REFER`, `CD_CONTA`, `ORDEM_EXERC`, ORDER BY `_versao_ingestao` DESC)
+# MAGIC 2. **Conversão de tipos**: Datas (`to_date`), valores numéricos (`DoubleType`, `IntegerType`)
+# MAGIC 3. **Deduplicação**: via Window Function (`row_number() == 1`) + guardrail de unicidade da chave de negócio
+# MAGIC 4. **Tratamento de nulls**: Remoção de registros com `CNPJ_CIA`, `DT_REFER`, `CD_CONTA`, `VL_CONTA` nulos
+# MAGIC 5. **Colunas calculadas**: `ANO`, `TRIMESTRE`, `MES` extraídos de `DT_REFER`; `DT_PROCESSAMENTO` (timestamp)
+# MAGIC 6. **Normalização de escala**: `VL_CONTA` multiplicado por 1000 quando `ESCALA_MOEDA = MIL`
+# MAGIC 7. **Enriquecimento hierárquico**: `ST_CONTA_FIXA`, `NIVEL_CONTA`, `CD_CONTA_PAI`, `CD_CONTA_RAIZ`, `TIPO_CONTA`
 # MAGIC
 # MAGIC ## Estratégia de Gravação
 # MAGIC **REPLACE WHERE**: Substituição atômica por período - Delta Lake garante operação all-or-nothing, eliminando janela de vulnerabilidade
@@ -41,12 +46,18 @@
 # MAGIC ## Enriquecimento Hierárquico de Contas
 # MAGIC A CVM publica contas contábeis em estrutura hierárquica por notação de pontos (`CD_CONTA`): `2` → `2.01` → `2.01.01` → `2.01.01.01` → `2.01.01.01.01` (até 5 níveis). A Silver deriva 4 colunas dessa estrutura:
 # MAGIC
-# MAGIC * **`ST_CONTA_FIXA`**: Projetada da Bronze (S = conta fixa da estrutura CVM, N = detalhamento específico por empresa). Antes descartada na projeção Silver, agora preservada
+# MAGIC * **`ST_CONTA_FIXA`**: Projetada da Bronze (S = conta fixa da estrutura CVM, N = detalhamento específico por empresa)
 # MAGIC * **`NIVEL_CONTA`**: Nível hierárquico, derivado via `size(split(CD_CONTA, "[.]"))` (1 a 5)
 # MAGIC * **`CD_CONTA_PAI`**: Conta pai na hierarquia — tudo antes do último `.` (NULL para nível 1)
 # MAGIC * **`CD_CONTA_RAIZ`**: Conta raiz — primeiro segmento antes do primeiro `.` (ex: `2.01.01` → `2`)
+# MAGIC * **`TIPO_CONTA`**: `TOTALIZADORA` (até 2 níveis) ou `ANALITICA` (3+ níveis)
 # MAGIC
 # MAGIC **Rollup**: o valor do pai é a soma dos filhos diretos. Dashboards devem filtrar por `NIVEL_CONTA` para evitar double-counting (somar todos os registros soma pais + filhos, inflando o total).
+# MAGIC
+# MAGIC ## Fontes
+# MAGIC * **Origem**: `{SCHEMA_BRONZE}.103_bpp_dfp` — dados brutos ingeridos da CVM (notebook 103_cvm_dfp_bpp)
+# MAGIC * **Metadados**: `_metadata.json` da Landing Zone (`{VOLUME_LANDING_DFP}/{ano}/`) — `last_modified_cvm` para idempotência
+# MAGIC * **Destino**: `{SCHEMA_SILVER}.203_bpp_dfp` — dados limpos, padronizados e prontos para análise
 
 # COMMAND ----------
 
@@ -116,6 +127,28 @@ for ano in ANOS_PROCESSAR:
     logger.info("="*80)
     
     try:
+        # Ler last_modified_cvm do _metadata.json para check de idempotência
+        metadata_path = f"{VOLUME_LANDING_DFP}/{ano}/_metadata.json"
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+        last_modified_cvm = metadata.get('last_modified_cvm')
+
+        # IDEMPOTÊNCIA (CARGA=incremental): skip se Bronze não mudou
+        if CARGA != "completa":
+            ja_processado = spark.sql(f"""
+                SELECT COUNT(*) as count
+                FROM {SCHEMA_APOIO}.controle_ingestao
+                WHERE fonte = 'bpp_silver'
+                  AND ano = {ano}
+                  AND last_modified_cvm = '{last_modified_cvm}'
+                  AND status = 'SUCCESS'
+            """).collect()[0]['count']
+            
+            if ja_processado > 0:
+                logger.info(f"⏭️  [SKIP] Ano {ano} já processado para esta versão CVM")
+                anos_sucesso.append(ano)
+                continue
+
         # ETAPA 1: Filtro de versionamento (Window Function)
         # Particiona por chave natural e seleciona versão mais recente via Window Function
         logger.info("[1/4] Aplicando filtro de versionamento...")
@@ -283,7 +316,7 @@ for ano in ANOS_PROCESSAR:
                 'bpp_silver',
                 {ano},
                 '{SCHEMA_SILVER}.203_bpp_dfp',
-                NULL,
+                '{last_modified_cvm}',
                 1,
                 current_timestamp(),
                 'SUCCESS',

@@ -18,11 +18,20 @@
 # MAGIC
 # MAGIC ## Conteúdo
 # MAGIC * Detecção automática de anos pendentes via `inicializar_anos_processar()` (sem HTTP para CVM)
+# MAGIC * Bifurcação por CARGA: `completa` (DELETE + reprocessamento limpo) vs `incremental` (idempotência via `controle_ingestao`)
 # MAGIC * Extração de arquivo ZIP da Landing Zone em memória
-# MAGIC * Guardrails: arquivo vazio → PARA, schema inválido → PARA
-# MAGIC * Carga na camada bronze via APPEND-ONLY (preserva histórico de versões)
-# MAGIC * Idempotência: controle + verificação de dados reais na tabela destino + comparação de Last-Modified (`_metadata.json` vs `controle_ingestao`) para detectar republicações
+# MAGIC * Guardrails: arquivo vazio → PARA, schema inválido → PARA, reconciliação de contagem pós-gravação → PARA
+# MAGIC * Reconciliação em 4 pontos: extração→Spark, pós-validação de schema, pós-metadados técnicos, pós-gravação na tabela Delta
+# MAGIC * Metadados técnicos adicionados: `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts`, `_source_file`
+# MAGIC * Carga na camada bronze via APPEND-ONLY com versionamento (preserva histórico de todas as versões ingeridas)
+# MAGIC * Idempotência: verificação em `controle_ingestao` por `fonte` + `ano` + `last_modified_cvm` + `status=SUCCESS`; versionamento incremental (`MAX(_versao_ingestao) + 1`) na tabela destino
+# MAGIC * Observabilidade: `registrar_observabilidade_execucao()` registra sucesso/falha por ano com duração e registros
 # MAGIC * Processamento resiliente: try/except por ano (falha isolada não interrompe demais)
+# MAGIC
+# MAGIC ## Fontes
+# MAGIC * **Origem**: ZIP da Landing Zone (`{VOLUME_LANDING_DFP}/{ano}/dfp_cia_aberta_{ano}.zip`) — arquivo já baixado pelo notebook de verificação diária
+# MAGIC * **Metadados**: `_metadata.json` na Landing Zone (`{VOLUME_LANDING_DFP}/{ano}/`) — `last_modified_cvm` para idempotência
+# MAGIC * **Destino**: `{SCHEMA_BRONZE}.102_bpa_dfp` — dados brutos com metadados técnicos, APPEND-ONLY
 # MAGIC
 # MAGIC ## Função
 # MAGIC Camada **Bronze** - Ingestão bruta mantendo a estrutura original fornecida pela fonte oficial (CVM).
@@ -114,20 +123,30 @@ for ano in ANOS_PROCESSAR:
 
         last_modified_cvm = metadata.get('last_modified_cvm')
 
-        # IDEMPOTÊNCIA: Verificar se já processado
-        ja_processado = spark.sql(f"""
-            SELECT COUNT(*) as count
-            FROM {SCHEMA_APOIO}.controle_ingestao
-            WHERE fonte = 'bpa'
-              AND ano = {ano}
-              AND last_modified_cvm = '{last_modified_cvm}'
-              AND status = 'SUCCESS'
-        """).collect()[0]['count']
-        
-        if ja_processado > 0:
-            logger.info(f"⏭️  [SKIP] Ano {ano} já processado com esta versão CVM")
-            anos_sucesso.append(ano)
-            continue
+        # BIFURCAÇÃO POR CARGA
+        if CARGA == "completa":
+            # CARGA=completa: remove registros desta mesma publicação CVM para reprocessar limpo
+            spark.sql(f"""
+                DELETE FROM {SCHEMA_BRONZE}.102_bpa_dfp
+                WHERE year(DT_REFER) = {ano}
+                  AND _last_modified_cvm = '{last_modified_cvm}'
+            """)
+            logger.info(f"[CARGA COMPLETA] Dados de last_modified={last_modified_cvm} removidos para reprocessamento")
+        else:
+            # CARGA=incremental: check de idempotência
+            ja_processado = spark.sql(f"""
+                SELECT COUNT(*) as count
+                FROM {SCHEMA_APOIO}.controle_ingestao
+                WHERE fonte = 'bpa'
+                  AND ano = {ano}
+                  AND last_modified_cvm = '{last_modified_cvm}'
+                  AND status = 'SUCCESS'
+            """).collect()[0]['count']
+            
+            if ja_processado > 0:
+                logger.info(f"⏭️  [SKIP] Ano {ano} já processado com esta versão CVM")
+                anos_sucesso.append(ano)
+                continue
         
         # Buscar próxima versão de ingestão para este ano
         versao_atual = spark.sql(f"""
