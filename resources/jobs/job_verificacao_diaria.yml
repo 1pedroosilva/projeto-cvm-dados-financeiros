@@ -19,7 +19,15 @@ resources:
         pause_status: UNPAUSED
 
       tasks:
+        - task_key: ddl_create_tables
+          notebook_task:
+            notebook_path: ../../05_apoio/001_ddl_create_tables.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+
         - task_key: verificacao_landing
+          depends_on:
+            - task_key: ddl_create_tables
           notebook_task:
             notebook_path: ../../05_apoio/004_verificacao_diaria_landing.py
             base_parameters:

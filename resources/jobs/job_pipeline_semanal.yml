@@ -20,19 +20,31 @@ resources:
         pause_status: UNPAUSED
 
       tasks:
+        - task_key: ddl_create_tables
+          notebook_task:
+            notebook_path: ../../05_apoio/001_ddl_create_tables.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+
         - task_key: bronze_dre
+          depends_on:
+            - task_key: ddl_create_tables
           notebook_task:
             notebook_path: ../../01_bronze/101_cvm_dfp_dre.py
             base_parameters:
               AMBIENTE: ${bundle.target}
 
         - task_key: bronze_bpa
+          depends_on:
+            - task_key: ddl_create_tables
           notebook_task:
             notebook_path: ../../01_bronze/102_cvm_dfp_bpa.py
             base_parameters:
               AMBIENTE: ${bundle.target}
 
         - task_key: bronze_bpp
+          depends_on:
+            - task_key: ddl_create_tables
           notebook_task:
             notebook_path: ../../01_bronze/103_cvm_dfp_bpp.py
             base_parameters:
