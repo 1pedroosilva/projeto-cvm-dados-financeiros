@@ -8,22 +8,18 @@
 # MAGIC # Criação de Schemas e Tabelas Unity Catalog
 # MAGIC
 # MAGIC ## Objetivo
-# MAGIC Estabelecer a estrutura de dados do projeto via DDL explícito. Cria schemas das três camadas (Bronze, Silver, Gold) e define todas as tabelas com tipos de dados, comentários e estrutura completa antes de qualquer ingestão.
+# MAGIC Estabelecer a estrutura de dados do projeto via DDL explícito.
 # MAGIC
-# MAGIC ## Abordagem de Governança
-# MAGIC * **Separação DDL/DML**: Infraestrutura (CREATE TABLE) separada de dados (INSERT/APPEND) - padrão de governança bancária
-# MAGIC * **Schema explícito**: Todos os tipos de dados declarados manualmente (STRING, INT, DOUBLE, DATE, TIMESTAMP)
-# MAGIC * **Idempotência**: `CREATE IF NOT EXISTS` permite reexecução sem erros
-# MAGIC * **Metadados técnicos**: Colunas `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts`, `_source_file` para auditoria
+# MAGIC ## O que é criado
+# MAGIC * **4 schemas**: Bronze, Silver, Gold e Apoio
+# MAGIC * **3 tabelas Bronze**: 101_dre_dfp, 102_bpa_dfp, 103_bpp_dfp
+# MAGIC * **3 tabelas Silver**: 201_dre_dfp, 202_bpa_dfp, 203_bpp_dfp
+# MAGIC * **3 tabelas de apoio**: controle_ingestao, observabilidade_execucoes, observabilidade_guardrails
 # MAGIC
-# MAGIC ## Estrutura Criada
-# MAGIC * **Schemas**: definidos por SCHEMA_BRONZE, SCHEMA_SILVER, SCHEMA_GOLD, SCHEMA_APOIO no config_parametros
-# MAGIC * **Tabelas Bronze**: `101_dre_dfp`, `102_bpa_dfp`, `103_bpp_dfp` (append-only com versionamento)
-# MAGIC * **Tabelas Silver**: `201_dre_dfp`, `202_bpa_dfp`, `203_bpp_dfp` (versão mais recente + enriquecimento)
-# MAGIC * **Tabelas de Apoio**: `controle_ingestao` (8 colunas, rastreia cada ingestão), `observabilidade_execucoes` (26 colunas, métricas detalhadas de execução)
-# MAGIC
-# MAGIC ## Função
-# MAGIC Script de apoio - Setup de infraestrutura Unity Catalog
+# MAGIC ## Características
+# MAGIC * **Idempotente**: todas as instruções usam `CREATE IF NOT EXISTS`
+# MAGIC * **Sem migrations**: não contém `ALTER TABLE` nem `apply_schema_migration_if_needed()`
+# MAGIC * **Ambientes com tabelas antigas**: fazer `DROP TABLE` manual antes de rodar este DDL
 
 # COMMAND ----------
 
@@ -33,7 +29,6 @@
 # COMMAND ----------
 
 # DBTITLE 1,CRIAÇÃO DE SCHEMAS
-# Criação de schemas Bronze, Silver e Gold
 spark.sql(f"""
 CREATE SCHEMA IF NOT EXISTS {SCHEMA_BRONZE}
 COMMENT 'Camada Bronze - Ingestão bruta de dados da CVM sem transformações'
@@ -49,105 +44,16 @@ CREATE SCHEMA IF NOT EXISTS {SCHEMA_GOLD}
 COMMENT 'Camada Gold - Métricas de negócio e agregações para análise'
 """)
 
-print("✅ Schemas criados com sucesso")
+spark.sql(f"""
+CREATE SCHEMA IF NOT EXISTS {SCHEMA_APOIO}
+COMMENT 'Schema de apoio - tabelas de controle, observabilidade e configuração do pipeline'
+""")
+
+print("✅ Schemas criados: Bronze, Silver, Gold, Apoio")
 
 # COMMAND ----------
 
-# DBTITLE 1,SCHEMA EVOLUTION - Migrations Idempotentes
-# ============================================================================
-# SCHEMA EVOLUTION: Aplicar correções de tipo em ambientes existentes
-# ============================================================================
-# Garante que código funciona tanto em ambiente novo quanto em workspace
-# com versões anteriores das tabelas. ALTER TABLE preserva dados e metadados.
-# Idempotente: pode ser executado múltiplas vezes sem efeito colateral.
-
-def apply_schema_migration_if_needed():
-    """Aplica migrações de schema de forma idempotente.
-    
-    Migrations:
-    - 001 (31/07/2026): Correção tipos STRING → INT/TIMESTAMP
-      - Motivo: Alinhamento DDL com transformações + detecção de atualizações
-      - Tabelas: Silver (VERSAO, CD_CVM), Controle (last_modified_cvm)
-    """
-    
-    migrations = [
-        # Migration 001: Correção tipos STRING → INT/TIMESTAMP (31/07/2026)
-        (f"{SCHEMA_APOIO}.controle_ingestao", "last_modified_cvm", "TIMESTAMP",
-         "Permite comparação direta com datetime HTTP Last-Modified"),
-        (f"{SCHEMA_SILVER}.201_dre_dfp", "VERSAO", "INT",
-         "Alinhamento com cast aplicado na transformação Silver"),
-        (f"{SCHEMA_SILVER}.201_dre_dfp", "CD_CVM", "INT",
-         "Alinhamento com cast aplicado na transformação Silver"),
-        (f"{SCHEMA_SILVER}.202_bpa_dfp", "VERSAO", "INT",
-         "Alinhamento com cast aplicado na transformação Silver"),
-        (f"{SCHEMA_SILVER}.202_bpa_dfp", "CD_CVM", "INT",
-         "Alinhamento com cast aplicado na transformação Silver"),
-    ]
-    
-    print("="*80)
-    print("SCHEMA EVOLUTION - Aplicando migrations (idempotente)")
-    print("="*80)
-    
-    for table, column, new_type, reason in migrations:
-        try:
-            spark.sql(f"ALTER TABLE {table} ALTER COLUMN {column} TYPE {new_type}")
-            print(f"✅ {table}.{column} → {new_type}")
-            print(f"   Motivo: {reason}")
-        except Exception as e:
-            error_msg = str(e)
-            
-            # Tabela não existe ainda (será criada pelo CREATE abaixo)
-            if "TABLE_OR_VIEW_NOT_FOUND" in error_msg or "does not exist" in error_msg:
-                print(f"⏭️  {table}.{column} - Tabela não existe (será criada)")
-            
-            # Coluna já está no tipo correto
-            elif "Cannot safely cast" in error_msg or "same type" in error_msg:
-                print(f"✓  {table}.{column} - Já está como {new_type}")
-            
-            # Outro erro (reportar mas não falhar)
-            else:
-                print(f"⚠️  {table}.{column} - {error_msg[:100]}")
-    
-    # Migration 002: Adição de colunas TIPO_CONTA e TIPO_ESTRUTURAL (20/09/2026)
-    # Identificado pelas EDAs 001/002/003 como correção necessária para evitar
-    # dupla contagem em somas (totalizadoras + analíticas) e distinguir
-    # contas aditivas (soma de filhas) de derivadas (fórmula entre irmãs)
-    add_column_migrations = [
-        (f"{SCHEMA_SILVER}.201_dre_dfp", "TIPO_CONTA", "STRING",
-         "Classificação TOTALIZADORA vs ANALITICA (EDA 001)"),
-        (f"{SCHEMA_SILVER}.201_dre_dfp", "TIPO_ESTRUTURAL", "STRING",
-         "Classificação ADITIVA vs DERIVADA para totalizadoras da DRE (EDA 001)"),
-        (f"{SCHEMA_SILVER}.202_bpa_dfp", "TIPO_CONTA", "STRING",
-         "Classificação TOTALIZADORA vs ANALITICA (EDA 002)"),
-        (f"{SCHEMA_SILVER}.203_bpp_dfp", "TIPO_CONTA", "STRING",
-         "Classificação TOTALIZADORA vs ANALITICA (EDA 003)"),
-    ]
-    
-    for table, column, col_type, reason in add_column_migrations:
-        try:
-            spark.sql(f"ALTER TABLE {table} ADD COLUMNS ({column} {col_type})")
-            print(f"✅ {table}.{column} adicionada ({col_type})")
-            print(f"   Motivo: {reason}")
-        except Exception as e:
-            error_msg = str(e)
-            if "TABLE_OR_VIEW_NOT_FOUND" in error_msg or "does not exist" in error_msg:
-                print(f"⏭️  {table}.{column} - Tabela não existe (será criada)")
-            elif "already exists" in error_msg or "DUPLICATE_COLUMN" in error_msg:
-                print(f"✓  {table}.{column} - Coluna já existe")
-            else:
-                print(f"⚠️  {table}.{column} - {error_msg[:100]}")
-    
-    print("="*80)
-    print("Migrations concluídas. Prosseguindo com CREATE TABLE IF NOT EXISTS...")
-    print("="*80)
-
-# Executar migrations antes de criar tabelas
-apply_schema_migration_if_needed()
-
-# COMMAND ----------
-
-# DBTITLE 1,CRIAÇÃO DA TABELA BRONZE - 101_dre_dfp
-# Tabela Bronze: DRE (dados brutos as-is + metadados técnicos de ingestão)
+# DBTITLE 1,BRONZE - 101_dre_dfp
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {SCHEMA_BRONZE}.101_dre_dfp (
   CNPJ_CIA STRING,
@@ -169,17 +75,13 @@ CREATE TABLE IF NOT EXISTS {SCHEMA_BRONZE}.101_dre_dfp (
   _last_modified_cvm STRING,
   _ingest_ts TIMESTAMP,
   _source_file STRING
-)
-USING DELTA
-COMMENT 'DRE consolidada - Dados brutos extraídos do portal CVM. Mantém estrutura original + metadados técnicos + versionamento (_versao_ingestao preserva TODAS as versões).'
+) USING DELTA
+COMMENT 'DRE consolidada - Dados brutos da CVM. Append-only com versionamento.'
 """)
-
-print(f"✅ Tabela {SCHEMA_BRONZE}.101_dre_dfp criada")
 
 # COMMAND ----------
 
-# DBTITLE 1,CRIAÇÃO DA TABELA BRONZE - 102_bpa_dfp
-# Tabela Bronze: BPA (dados brutos as-is + metadados técnicos de ingestão)
+# DBTITLE 1,BRONZE - 102_bpa_dfp
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {SCHEMA_BRONZE}.102_bpa_dfp (
   CNPJ_CIA STRING,
@@ -191,7 +93,6 @@ CREATE TABLE IF NOT EXISTS {SCHEMA_BRONZE}.102_bpa_dfp (
   MOEDA STRING,
   ESCALA_MOEDA STRING,
   ORDEM_EXERC STRING,
-  -- DT_INI_EXERC removida: BPA não contém na fonte CVM (snapshot, não período)
   DT_FIM_EXERC STRING,
   CD_CONTA STRING,
   DS_CONTA STRING,
@@ -201,17 +102,13 @@ CREATE TABLE IF NOT EXISTS {SCHEMA_BRONZE}.102_bpa_dfp (
   _last_modified_cvm STRING,
   _ingest_ts TIMESTAMP,
   _source_file STRING
-)
-USING DELTA
-COMMENT 'BPA consolidado - Dados brutos extraídos do portal CVM. Mantém estrutura original + metadados técnicos + versionamento (_versao_ingestao preserva TODAS as versões).'
+) USING DELTA
+COMMENT 'BPA consolidado - Dados brutos da CVM. Append-only com versionamento.'
 """)
-
-print(f"✅ Tabela {SCHEMA_BRONZE}.102_bpa_dfp criada")
 
 # COMMAND ----------
 
-# DBTITLE 1,CRIAÇÃO DA TABELA BRONZE - 103_bpp_dfp
-# Tabela Bronze: BPP (dados brutos as-is + metadados técnicos de ingestão)
+# DBTITLE 1,BRONZE - 103_bpp_dfp
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {SCHEMA_BRONZE}.103_bpp_dfp (
   CNPJ_CIA STRING,
@@ -232,53 +129,13 @@ CREATE TABLE IF NOT EXISTS {SCHEMA_BRONZE}.103_bpp_dfp (
   _last_modified_cvm STRING,
   _ingest_ts TIMESTAMP,
   _source_file STRING
-)
-USING DELTA
-COMMENT 'BPP consolidado - Dados brutos extraídos do portal CVM. Mantém estrutura original + metadados técnicos + versionamento (_versao_ingestao preserva TODAS as versões).'
+) USING DELTA
+COMMENT 'BPP consolidado - Dados brutos da CVM. Append-only com versionamento.'
 """)
-
-print(f"✅ Tabela {SCHEMA_BRONZE}.103_bpp_dfp criada")
 
 # COMMAND ----------
 
-# DBTITLE 1,CRIACAO DA TABELA SILVER - 203_bpp_dfp
-# Tabela Silver: BPP transformada (dados limpos e enriquecidos, particionada por ANO)
-spark.sql(f"""
-CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.203_bpp_dfp (
-  CNPJ_CIA STRING,
-  DT_REFER DATE,
-  VERSAO INT,
-  DENOM_CIA STRING,
-  CD_CVM INT,
-  GRUPO_DFP STRING,
-  MOEDA STRING,
-  ESCALA_MOEDA STRING,
-  ORDEM_EXERC STRING,
-  DT_FIM_EXERC DATE,
-  CD_CONTA STRING,
-  DS_CONTA STRING,
-  VL_CONTA DOUBLE,
-  ANO INT,
-  TRIMESTRE INT,
-  MES INT,
-  DT_PROCESSAMENTO TIMESTAMP,
-  ST_CONTA_FIXA STRING,
-  NIVEL_CONTA INT,
-  CD_CONTA_PAI STRING,
-  CD_CONTA_RAIZ STRING,
-  TIPO_CONTA STRING
-)
-USING DELTA
-PARTITIONED BY (ANO)
-COMMENT 'BPP transformado - Dados limpos, tipados e enriquecidos com colunas temporais. Particionada por ano para DELETE+APPEND incremental eficiente.'
-""")
-
-print(f"✅ Tabela {SCHEMA_SILVER}.203_bpp_dfp criada")
-
-# COMMAND ----------
-
-# DBTITLE 1,CRIACAO DA TABELA SILVER - 201_dre_dfp
-# Tabela Silver: DRE transformada (dados limpos e enriquecidos, particionada por ANO)
+# DBTITLE 1,SILVER - 201_dre_dfp
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.201_dre_dfp (
   CNPJ_CIA STRING,
@@ -305,18 +162,14 @@ CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.201_dre_dfp (
   CD_CONTA_RAIZ STRING,
   TIPO_CONTA STRING,
   TIPO_ESTRUTURAL STRING
-)
-USING DELTA
+) USING DELTA
 PARTITIONED BY (ANO)
-COMMENT 'DRE transformada - Dados limpos, tipados e enriquecidos com colunas temporais. Particionada por ano para MERGE incremental eficiente.'
+COMMENT 'DRE transformada - Dados limpos, tipados e enriquecidos. Particionada por ano.'
 """)
-
-print(f"✅ Tabela {SCHEMA_SILVER}.201_dre_dfp criada")
 
 # COMMAND ----------
 
-# DBTITLE 1,CRIACAO DA TABELA SILVER - 202_bpa_dfp
-# Tabela Silver: BPA transformada (dados limpos e enriquecidos, particionada por ANO)
+# DBTITLE 1,SILVER - 202_bpa_dfp
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.202_bpa_dfp (
   CNPJ_CIA STRING,
@@ -328,7 +181,6 @@ CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.202_bpa_dfp (
   MOEDA STRING,
   ESCALA_MOEDA STRING,
   ORDEM_EXERC STRING,
-  -- DT_INI_EXERC removida: BPA não contém na fonte CVM (snapshot, não período)
   DT_FIM_EXERC DATE,
   CD_CONTA STRING,
   DS_CONTA STRING,
@@ -342,130 +194,128 @@ CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.202_bpa_dfp (
   CD_CONTA_PAI STRING,
   CD_CONTA_RAIZ STRING,
   TIPO_CONTA STRING
-)
-USING DELTA
+) USING DELTA
 PARTITIONED BY (ANO)
-COMMENT 'BPA transformado - Dados limpos, tipados e enriquecidos com colunas temporais. Particionada por ano para DELETE+APPEND incremental eficiente.'
+COMMENT 'BPA transformado - Dados limpos, tipados e enriquecidos. Particionada por ano.'
 """)
-
-print(f"✅ Tabela {SCHEMA_SILVER}.202_bpa_dfp criada")
 
 # COMMAND ----------
 
-# DBTITLE 1,CRIACAO DA TABELA DE OBSERVABILIDADE
-# ============================================================================
-# TABELA DE OBSERVABILIDADE (schema de apoio)
-# ============================================================================
-# Rastreia todas as execuções do pipeline com métricas detalhadas
-# Alimentada pelo notebook 004_verificacao_diaria_landing e pelos notebooks bronze/silver
-
-# Schema de apoio (criado também no 002_ddl_controle_ingestao — idempotente)
+# DBTITLE 1,SILVER - 203_bpp_dfp
 spark.sql(f"""
-CREATE SCHEMA IF NOT EXISTS {SCHEMA_APOIO}
-COMMENT 'Schema para tabelas de apoio, controle e configuração do pipeline'
+CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.203_bpp_dfp (
+  CNPJ_CIA STRING,
+  DT_REFER DATE,
+  VERSAO INT,
+  DENOM_CIA STRING,
+  CD_CVM INT,
+  GRUPO_DFP STRING,
+  MOEDA STRING,
+  ESCALA_MOEDA STRING,
+  ORDEM_EXERC STRING,
+  DT_FIM_EXERC DATE,
+  CD_CONTA STRING,
+  DS_CONTA STRING,
+  VL_CONTA DOUBLE,
+  ANO INT,
+  TRIMESTRE INT,
+  MES INT,
+  DT_PROCESSAMENTO TIMESTAMP,
+  ST_CONTA_FIXA STRING,
+  NIVEL_CONTA INT,
+  CD_CONTA_PAI STRING,
+  CD_CONTA_RAIZ STRING,
+  TIPO_CONTA STRING
+) USING DELTA
+PARTITIONED BY (ANO)
+COMMENT 'BPP transformado - Dados limpos, tipados e enriquecidos. Particionada por ano.'
 """)
 
-# Tabela de observabilidade: maior que controle_ingestao (8 cols → 26 cols)
+# COMMAND ----------
+
+# DBTITLE 1,APOIO - controle_ingestao
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.controle_ingestao (
+  fonte STRING COMMENT 'Identificador da fonte (dre, bpa, bpp, dre_silver, etc.)',
+  ano INT COMMENT 'Ano fiscal do arquivo',
+  arquivo STRING COMMENT 'Nome do arquivo ou tabela destino',
+  last_modified_cvm TIMESTAMP COMMENT 'Last-Modified HTTP do arquivo na CVM',
+  versao_ingestao INT COMMENT 'Versão sequencial de ingestão',
+  ingest_ts TIMESTAMP COMMENT 'Timestamp da ingestão',
+  status STRING COMMENT 'SUCCESS, FAILED',
+  mensagem STRING COMMENT 'Mensagem de erro ou observações'
+) USING DELTA
+COMMENT 'Controle de ingestão - rastreia cada ingestão fonte/ano e detecta atualizações CVM'
+""")
+
+# COMMAND ----------
+
+# DBTITLE 1,APOIO - observabilidade_execucoes
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.observabilidade_execucoes (
-  -- Identificação da execução
-  id_execucao STRING COMMENT 'UUID único por execução de task',
-  job_id BIGINT COMMENT 'ID do job no Databricks',
+  id_execucao STRING COMMENT 'UUID único por execução',
+  job_id BIGINT COMMENT 'ID do job Databricks',
   job_name STRING COMMENT 'Nome do job',
-  run_id BIGINT COMMENT 'ID da execução (run) do job',
+  run_id BIGINT COMMENT 'ID da run do job',
   task_key STRING COMMENT 'Chave da task dentro do job',
   notebook_path STRING COMMENT 'Caminho do notebook executado',
-
-  -- Contexto do pipeline
-  etapa STRING COMMENT 'Etapa: verificacao, download, bronze, silver',
-  fonte STRING COMMENT 'Fonte: dre, bpa, bpp, landing',
-  ano INT COMMENT 'Ano processado (NULL se múltiplos anos)',
-
-  -- Execução
+  etapa STRING COMMENT 'verificacao, download, bronze, silver',
+  fonte STRING COMMENT 'dre, bpa, bpp, landing',
+  ano INT COMMENT 'Ano processado (NULL se múltiplos)',
   inicio_ts TIMESTAMP COMMENT 'Início da execução',
   fim_ts TIMESTAMP COMMENT 'Fim da execução',
   duracao_segundos DOUBLE COMMENT 'Duração em segundos',
   status STRING COMMENT 'SUCCESS, ERROR, SKIPPED, PARTIAL',
-
-  -- Métricas de arquivos (landing zone)
-  arquivos_verificados INT COMMENT 'Número de arquivos verificados na CVM',
-  arquivos_baixados INT COMMENT 'Número de arquivos baixados',
-  arquivos_arquivados INT COMMENT 'Número de arquivos arquivados (versionamento)',
-  arquivos_ignorados INT COMMENT 'Número de arquivos já atualizados',
-
-  -- Métricas de dados (bronze/silver)
-  registros_processados BIGINT COMMENT 'Número de registros processados',
-  bytes_baixados BIGINT COMMENT 'Bytes baixados da CVM',
-  bytes_arquivados BIGINT COMMENT 'Bytes arquivados (versionamento)',
-
-  -- Metadados da fonte CVM
-  last_modified_cvm TIMESTAMP COMMENT 'Last-Modified do arquivo na CVM',
+  arquivos_verificados INT COMMENT 'Arquivos verificados na CVM (landing)',
+  arquivos_baixados INT COMMENT 'Arquivos baixados (landing)',
+  arquivos_arquivados INT COMMENT 'Arquivos arquivados (landing)',
+  arquivos_ignorados INT COMMENT 'Arquivos já atualizados (landing)',
+  registros_processados BIGINT COMMENT 'Registros processados (bronze/silver)',
+  bytes_baixados BIGINT COMMENT 'Bytes baixados da CVM (landing)',
+  bytes_arquivados BIGINT COMMENT 'Bytes arquivados (landing)',
+  last_modified_cvm TIMESTAMP COMMENT 'Last-Modified do arquivo CVM',
   url_cvm STRING COMMENT 'URL do arquivo CVM',
-
-  -- Erro
-  tipo_erro STRING COMMENT 'Tipo do erro (ex: HTTPError, ValueError)',
+  tipo_erro STRING COMMENT 'Tipo do erro (ex: ValueError)',
   mensagem_erro STRING COMMENT 'Mensagem de erro (até 2000 chars)',
-
-  -- Ambiente
-  trigger_type STRING COMMENT 'Tipo de trigger (SCHEDULED, ONE_TIME, etc.)',
+  trigger_type STRING COMMENT 'SCHEDULED, ONE_TIME, etc.',
   parametros STRING COMMENT 'Parâmetros do job (JSON)',
-
-  -- Auditoria
   created_at TIMESTAMP COMMENT 'Timestamp de criação do registro'
-)
-USING DELTA
-COMMENT 'Observabilidade - registra todas as execuções do pipeline CVM com métricas detalhadas de arquivos, dados e erros'
+) USING DELTA
+COMMENT 'Observabilidade - execuções do pipeline CVM com métricas de arquivos, dados e erros'
 """)
 
-print(f"✅ Tabela {SCHEMA_APOIO}.observabilidade_execucoes criada")
+# COMMAND ----------
 
-# ============================================================================
-# TABELA DE CONTROLE DE INGESTÃO
-# ============================================================================
-# Criada AQUI (não apenas no 002) para garantir que existe antes de qualquer
-# detecção. Schema novo sem controle_ingestao quebra na primeira execução
-# do orquestrador (get_novos_anos_para_processar faz SELECT nela).
-spark.sql(f"""
-CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.controle_ingestao (
-  fonte STRING COMMENT 'Identificador da fonte de dados (ex: dre, bpa)',
-  ano INT COMMENT 'Ano fiscal do arquivo',
-  arquivo STRING COMMENT 'Nome do arquivo baixado',
-  last_modified_cvm TIMESTAMP COMMENT 'Data de última modificação do arquivo na CVM (header Last-Modified)',
-  versao_ingestao INT COMMENT 'Versão sequencial de ingestão',
-  ingest_ts TIMESTAMP COMMENT 'Timestamp da ingestão',
-  status STRING COMMENT 'Status da ingestão (SUCCESS, ERROR)',
-  mensagem STRING COMMENT 'Mensagem de erro ou observações'
-)
-USING DELTA
-COMMENT 'Controle de ingestão - Rastreia quando cada fonte/ano foi processado e detecta atualizações na CVM'
-""")
-
-print(f"✅ Tabela {SCHEMA_APOIO}.controle_ingestao criada")
-
-# ============================================================================
-# TABELA DE OBSERVABILIDADE - GUARDRAILS (schema de apoio)
-# ============================================================================
-# Rastreia validacoes de qualidade de dados (uma linha por check executado)
-# Alimentada por notebooks bronze/silver via registrar_guardrail()
-
+# DBTITLE 1,APOIO - observabilidade_guardrails
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.observabilidade_guardrails (
-  id_check STRING COMMENT 'UUID unico por check',
+  id_check STRING COMMENT 'UUID único por check',
   id_execucao STRING COMMENT 'FK para observabilidade_execucoes.id_execucao',
   etapa STRING COMMENT 'bronze, silver, gold',
-  fonte STRING COMMENT 'dre, bpa, bpp, etc.',
+  fonte STRING COMMENT 'dre, bpa, bpp',
   ano INT COMMENT 'Ano validado',
   nome_guardrail STRING COMMENT 'Nome descritivo do guardrail',
-  tipo_check STRING COMMENT 'schema_check, row_count, uniqueness, empty_file, empty_table, reconciliation',
+  tipo_check STRING COMMENT 'schema_check, row_count, uniqueness, empty_file, empty_table',
   resultado STRING COMMENT 'PASS, FAIL, WARN',
   esperado STRING COMMENT 'Valor esperado',
   encontrado STRING COMMENT 'Valor encontrado',
-  registros_afetados BIGINT COMMENT 'Registros que falharam a validacao',
+  registros_afetados BIGINT COMMENT 'Registros que falharam',
   detalhes STRING COMMENT 'Mensagem adicional',
   ts_check TIMESTAMP COMMENT 'Momento do check'
-)
-USING DELTA
-COMMENT 'Observabilidade - rastreia validacoes de qualidade de dados do pipeline CVM'
+) USING DELTA
+COMMENT 'Observabilidade - validações de qualidade de dados do pipeline CVM'
 """)
 
-print(f"✅ Tabela {SCHEMA_APOIO}.observabilidade_guardrails criada")
+# COMMAND ----------
+
+# DBTITLE 1,CONFIRMAÇÃO FINAL
+print("✅ DDL concluído\n")
+
+print("=== Tabelas Bronze ===")
+spark.sql(f"SHOW TABLES IN {SCHEMA_BRONZE}").show(truncate=False)
+
+print("=== Tabelas Silver ===")
+spark.sql(f"SHOW TABLES IN {SCHEMA_SILVER}").show(truncate=False)
+
+print("=== Tabelas de Apoio ===")
+spark.sql(f"SHOW TABLES IN {SCHEMA_APOIO}").show(truncate=False)
