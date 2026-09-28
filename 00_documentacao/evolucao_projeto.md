@@ -15,6 +15,28 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 
 
+## 27/09/2026 - Validacao do Redesign CARGA e Remocao de notebook_path
+
+### Contexto
+O redesign dos 6 notebooks Bronze/Silver para suportar CARGA="completa" (DELETE WHERE _last_modified_cvm + append limpo na Bronze; idempotencia via last_modified_cvm na Silver) foi aplicado mas o primeiro run de validacao aparentou nao ter gravado dados. Investigacao revelou erro de conversao de timestamp UTC para UTC-3: o run 880784226550252 ocorreu das 20:51 as 21:00 (UTC-3), nao 22:11, e os 72 guardrails gravados durante esse periodo confirmam que o redesign funcionou. Separadamente, a coluna `notebook_path` em `observabilidade_guardrails` era sempre NULL porque `dbutils.notebook.getContext().notebookPath()` falha silenciosamente em Spark Connect (Serverless), e o try/except engole a excecao. A coluna era redundante -- `etapa` + `fonte` ja identificam o notebook.
+
+### Decisoes
+* **Remover notebook_path de observabilidade_guardrails, nao corrigir a captura** -> A informacao e redundante: `etapa` + `fonte` identificam o notebook de origem. Corrigir a captura em Spark Connect adicionaria complexidade para preencher uma coluna sem valor analitico
+* **ALTER TABLE DROP COLUMN em vez de recriar a tabela** -> Delta Lake suporta DROP COLUMN com column mapping habilitado, preservando os 216 registros existentes sem reprocessamento
+* **Habilitar column mapping (delta.columnMapping.mode = name)** -> Pre-requisito do Delta para DROP COLUMN; alteracao irreversivel mas sem impacto operacional
+
+### Implementado
+* **Validacao do redesign CARGA="completa"**: 72 novos guardrails (36 bronze + 36 silver), todos PASS; Bronze com 2 versoes CVM (V1+V2) sem V3; Silver sem duplicacao; controle_ingestao de Silver agora grava last_modified_cvm (antes era NULL)
+* `config_parametros.py`: removido bloco try/except de captura de `notebook_path` e coluna do INSERT na funcao `registrar_guardrail()`
+* `001_ddl_create_tables.py`: removida coluna `notebook_path` da DDL de `observabilidade_guardrails`
+* `ALTER TABLE observabilidade_guardrails SET TBLPROPERTIES ('delta.columnMapping.mode' = 'name')` + `DROP COLUMN notebook_path` (216 registros preservados, 13 colunas restantes)
+* `arquitetura.md`: removida linha `notebook_path` da DDL documentada de `observabilidade_guardrails`
+
+### Key Insight
+`dbutils.notebook.getContext().notebookPath()` falha silenciosamente em Spark Connect (Serverless compute) -- o try/except com `pass` esconde a falha e a coluna fica sempre NULL. Quando uma coluna e redundante e a captura depende de API que nao funciona no runtime alvo, remover a coluna e mais limpo que tentar corrigir a captura. Separadamente, converter epoch millis para timezone local e erro facil de cometer e dificil de detectar -- sempre validar com `datetime.fromtimestamp()` antes de filtrar por timestamp.
+
+---
+
 ## 26/09/2026 - Testes de Integracao BPA e BPP + Cadeia Sequencial no Job
 
 ### Contexto
