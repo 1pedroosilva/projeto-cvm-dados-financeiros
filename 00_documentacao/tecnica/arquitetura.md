@@ -699,7 +699,6 @@ Rastreia validações de qualidade de dados (uma linha por check executado).
 CREATE TABLE {SCHEMA_APOIO}.observabilidade_guardrails (
     id_check            STRING,    -- UUID único por check
     id_execucao         STRING,    -- FK → observabilidade_execucoes.id_execucao
-    notebook_path       STRING,    -- Notebook que executou o check
     etapa               STRING,    -- bronze, silver, gold
     fonte               STRING,    -- dre, bpa, bpp, etc.
     ano                 INT,       -- Ano validado

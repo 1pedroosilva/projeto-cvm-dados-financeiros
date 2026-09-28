@@ -452,7 +452,6 @@ spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.observabilidade_guardrails (
   id_check STRING COMMENT 'UUID unico por check',
   id_execucao STRING COMMENT 'FK para observabilidade_execucoes.id_execucao',
-  notebook_path STRING COMMENT 'Notebook que executou o check',
   etapa STRING COMMENT 'bronze, silver, gold',
   fonte STRING COMMENT 'dre, bpa, bpp, etc.',
   ano INT COMMENT 'Ano validado',

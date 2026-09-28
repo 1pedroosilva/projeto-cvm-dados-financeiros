@@ -442,22 +442,16 @@ def registrar_guardrail(
         return "'" + str(val).replace("'", "''") + "'"
 
     id_check = str(uuid.uuid4())
-    notebook_path = None
-    try:
-        notebook_path = str(dbutils.notebook.getContext().notebookPath())
-    except Exception:
-        pass
 
     try:
         spark.sql(f"""
             INSERT INTO {CATALOG_NAME}.{SCHEMA_APOIO}.observabilidade_guardrails
-                (id_check, id_execucao, notebook_path, etapa, fonte, ano,
+                (id_check, id_execucao, etapa, fonte, ano,
                  nome_guardrail, tipo_check, resultado,
                  esperado, encontrado, registros_afetados, detalhes, ts_check)
             VALUES (
                 {_sql_str(id_check)},
                 {_sql_str(id_execucao)},
-                {_sql_str(notebook_path)},
                 {_sql_str(etapa)},
                 {_sql_str(fonte)},
                 {ano if ano is not None else 'NULL'},
