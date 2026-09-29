@@ -243,7 +243,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.controle_ingestao (
   versao_ingestao INT COMMENT 'Versão sequencial de ingestão',
   ingest_ts TIMESTAMP COMMENT 'Timestamp da ingestão',
   status STRING COMMENT 'SUCCESS, FAILED',
-  mensagem STRING COMMENT 'Mensagem de erro ou observações'
+  mensagem STRING COMMENT 'Mensagem de erro ou observações',
+  bytes_arquivo BIGINT COMMENT 'Tamanho do arquivo em bytes'
 ) USING DELTA
 COMMENT 'Controle de ingestão - rastreia cada ingestão fonte/ano e detecta atualizações CVM'
 """)

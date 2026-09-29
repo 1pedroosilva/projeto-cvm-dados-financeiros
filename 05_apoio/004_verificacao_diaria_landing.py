@@ -337,6 +337,12 @@ registrar_observabilidade_execucao(
     status=status_final,
     registros_processados=len(arquivos_baixados),
     mensagem_erro=mensagem_erro,
+    arquivos_verificados=len(ANOS_PROCESSAR),
+    arquivos_baixados=len(arquivos_baixados),
+    arquivos_arquivados=len(arquivos_arquivados),
+    arquivos_ignorados=len(arquivos_ignorados),
+    bytes_baixados=total_bytes_baixados,
+    bytes_arquivados=total_bytes_arquivados,
 )
 
 # Registrar job na tabela de observabilidade (MERGE idempotente)
