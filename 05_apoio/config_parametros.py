@@ -382,7 +382,6 @@ def registrar_observabilidade_execucao(
         mensagem_erro: mensagem de erro (opcional, até 2000 chars)
         tipo_erro: tipo do erro (opcional, ex: 'ValueError')
     """
-    import uuid
 
     def _sql_str(val):
         if val is None:
