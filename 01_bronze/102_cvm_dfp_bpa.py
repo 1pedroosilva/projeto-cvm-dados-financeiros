@@ -18,14 +18,14 @@
 # MAGIC
 # MAGIC ## Conteúdo
 # MAGIC * Detecção automática de anos pendentes via `inicializar_anos_processar()` (sem HTTP para CVM)
-# MAGIC * Bifurcação por CARGA: `completa` (DELETE + reprocessamento limpo) vs `incremental` (idempotência via `controle_ingestao`)
+# MAGIC * Bifurcação por CARGA: `completa` (APPEND + DELETE da versão antiga — invertido para atomicidade) vs `incremental` (idempotência via `controle_ingestao`)
 # MAGIC * Extração de arquivo ZIP da Landing Zone em memória
 # MAGIC * Guardrails: arquivo vazio → PARA, schema inválido → PARA, reconciliação de contagem pós-gravação → PARA
 # MAGIC * Reconciliação em 4 pontos: extração→Spark, pós-validação de schema, pós-metadados técnicos, pós-gravação na tabela Delta
 # MAGIC * Metadados técnicos adicionados: `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts`, `_source_file`
 # MAGIC * Carga na camada bronze via APPEND-ONLY com versionamento (preserva histórico de todas as versões ingeridas)
 # MAGIC * Idempotência: verificação em `controle_ingestao` por `fonte` + `ano` + `last_modified_cvm` + `status=SUCCESS`; versionamento incremental (`MAX(_versao_ingestao) + 1`) na tabela destino
-# MAGIC * Observabilidade: `registrar_observabilidade_execucao()` registra sucesso/falha por ano com duração e registros
+# MAGIC * Observabilidade: `registrar_observabilidade_execucao()` registra sucesso/falha por ano; `registrar_observabilidade_job()` atualiza o MERGE no nivel do run (contexto do job capturado via `dbutils.widgets.get()`)
 # MAGIC * Processamento resiliente: try/except por ano (falha isolada não interrompe demais)
 # MAGIC
 # MAGIC ## Fontes
@@ -97,6 +97,7 @@ id_execucao = str(uuid.uuid4())
 # Rastreamento de sucesso/falha
 anos_sucesso = []
 anos_falha = []
+_inicio_notebook = datetime.now()
 
 for ano in ANOS_PROCESSAR:
     inicio = time.time()
@@ -125,13 +126,11 @@ for ano in ANOS_PROCESSAR:
 
         # BIFURCAÇÃO POR CARGA
         if CARGA == "completa":
-            # CARGA=completa: remove registros desta mesma publicação CVM para reprocessar limpo
-            spark.sql(f"""
-                DELETE FROM {SCHEMA_BRONZE}.102_bpa_dfp
-                WHERE year(DT_REFER) = {ano}
-                  AND _last_modified_cvm = '{last_modified_cvm}'
-            """)
-            logger.info(f"[CARGA COMPLETA] Dados de last_modified={last_modified_cvm} removidos para reprocessamento")
+            # CARGA=completa: DELETE será feito APÓS o APPEND (não antes)
+            # Motivo: DELETE+APPEND não é atômico; se compute falhar entre os dois,
+            # a tabela fica com dados ausentes. Invertendo, o pior caso é dado
+            # redundante temporário, que Silver corrige via Window Function.
+            logger.info(f"[CARGA COMPLETA] Reprocessamento — DELETE da versão antiga será feito após APPEND")
         else:
             # CARGA=incremental: check de idempotência
             ja_processado = spark.sql(f"""
@@ -247,6 +246,17 @@ for ano in ANOS_PROCESSAR:
             .mode("append") \
             .saveAsTable(f"{SCHEMA_BRONZE}.102_bpa_dfp")
 
+        # CARGA=completa: DELETE da versão antiga APÓS o APPEND (invertido para atomicidade)
+        # Se falhar, fica redundante — Silver resolve via Window Function
+        if CARGA == "completa":
+            spark.sql(f"""
+                DELETE FROM {SCHEMA_BRONZE}.102_bpa_dfp
+                WHERE year(DT_REFER) = {ano}
+                  AND _last_modified_cvm = '{last_modified_cvm}'
+                  AND _versao_ingestao != {versao_atual}
+            """)
+            logger.info(f"[CARGA COMPLETA] Versão antiga (last_modified={last_modified_cvm}) removida pós-APPEND")
+
         # GUARDRAIL: Reconciliacao de contagem
         count_tabela = spark.table(f"{SCHEMA_BRONZE}.102_bpa_dfp") \
             .filter(year(col("DT_REFER")) == ano) \
@@ -306,6 +316,7 @@ for ano in ANOS_PROCESSAR:
         
         # Registrar observabilidade (Grupo B)
         registrar_observabilidade_execucao(
+            id_execucao=id_execucao,
             etapa='bronze',
             fonte='bpa',
             ano=ano,
@@ -313,7 +324,6 @@ for ano in ANOS_PROCESSAR:
             duracao_segundos=duracao,
             status='SUCCESS',
             registros_processados=count_gravar,
-            last_modified_cvm=str(last_modified_cvm) if last_modified_cvm else None
         )
         
     except Exception as e:
@@ -323,6 +333,7 @@ for ano in ANOS_PROCESSAR:
         
         # Registrar observabilidade (Grupo B)
         registrar_observabilidade_execucao(
+            id_execucao=id_execucao,
             etapa='bronze',
             fonte='bpa',
             ano=ano,
@@ -367,6 +378,13 @@ if anos_falha:
 else:
     logger.info("✓ Nenhuma falha")
 logger.info("="*80)
+
+# Registrar job na tabela de observabilidade (MERGE idempotente)
+registrar_observabilidade_job(
+    inicio_ts=_inicio_notebook,
+    fim_ts=datetime.now(),
+    status='ERROR' if anos_falha else 'SUCCESS',
+)
 
 # Garantir falha de job quando há períodos não processados
 if anos_falha:
