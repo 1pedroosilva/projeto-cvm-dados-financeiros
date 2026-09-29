@@ -1,6 +1,6 @@
 # Estado Atual do Projeto CVM
 
-> **Última atualização:** 26/09/2026 (testes de integração BPA e BPP)  
+> **Última atualização:** 28/09/2026 (Passo 2: observabilidade end-to-end)  
 > **Retrato do pipeline hoje — sem histórico, sem justificativas.**
 
 ---
@@ -100,7 +100,9 @@
 | Silver | `202_bpa_dfp` | BPA estruturado + hierarquia |
 | Silver | `203_bpp_dfp` | BPP estruturado + hierarquia |
 | Apoio | `controle_ingestao` | Registro de processamento (ano, status, timestamp) |
-| Apoio | `observabilidade_execucoes` | Métricas detalhadas de execução (populada por `registrar_observabilidade_execucao()` nos 6 notebooks Bronze/Silver: 101, 102, 103, 201, 202, 203) |
+| Apoio | `observabilidade_jobs` | Rastreia runs de jobs (MERGE idempotente) |
+| Apoio | `observabilidade_execucoes` | Métricas de execução por task/ano |
+| Apoio | `observabilidade_guardrails` | Resultados de guardrails |
 
 ### Volume
 

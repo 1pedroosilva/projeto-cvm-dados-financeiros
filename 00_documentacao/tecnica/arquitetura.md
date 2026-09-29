@@ -161,6 +161,8 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 
 **Estratégia de Gravação**: `APPEND-ONLY` (histórico completo preservado)
 
+> **CARGA=completa** (reprocessamento forçado): A ordem das operações foi invertida em 27/09/2026 para garantir atomicidade. Em vez de `DELETE + APPEND` (que deixa a tabela com dados ausentes se o compute falhar entre as duas operações), agora é `APPEND + DELETE` da versão antiga (`_last_modified_cvm` igual, `_versao_ingestao` diferente). Se o compute falhar após o APPEND e antes do DELETE, o pior caso é dado redundante temporário — a Silver corrige via Window Function que seleciona a versão mais recente.
+
 ---
 
 ### 2. Silver (Transformação e Limpeza)
@@ -637,7 +639,7 @@ Rastreia execuções de jobs (uma linha por run). Populated via MERGE idempotent
 **Estrutura**:
 ```sql
 CREATE TABLE {SCHEMA_APOIO}.observabilidade_jobs (
-    id_run           STRING,      -- UUID único por run (determinístico via uuid5)
+    -- PK composta: (job_id, run_id)
     job_id           BIGINT,      -- ID do job no Databricks
     job_name         STRING,      -- Nome do job
     run_id           BIGINT,      -- ID do run
@@ -664,8 +666,7 @@ Rastreia execuções de notebooks/tasks (uma linha por execução).
 ```sql
 CREATE TABLE {SCHEMA_APOIO}.observabilidade_execucoes (
     id_execucao          STRING,    -- UUID único
-    id_run               STRING,    -- FK → observabilidade_jobs.id_run
-    job_id               BIGINT,    -- Contexto do job
+    job_id               BIGINT,    -- Contexto do job (FK → observabilidade_jobs via job_id+run_id)
     job_name             STRING,    -- Nome do job
     run_id               BIGINT,    -- Contexto do run
     task_key             STRING,    -- Chave da task
@@ -687,8 +688,8 @@ CREATE TABLE {SCHEMA_APOIO}.observabilidade_execucoes (
 
 **Características**:
 * Sem colunas de landing (`arquivos_*`, `bytes_*`) — movidas para `controle_ingestao`
-* FK para `observabilidade_jobs` via `id_run` (permite drill-down sem JOIN complexo)
-* Captura contexto de job via `dbutils.jobs.getContext()` com fallback em 3 camadas
+* FK para `observabilidade_jobs` via chave composta `(job_id, run_id)` (colunas já presentes em ambas as tabelas)
+* Captura contexto de job via `dbutils.widgets.get()` (dynamic value references em `base_parameters` do job) com helper `_capturar_contexto_job()` — `os.getenv()` nao funciona em Serverless Compute
 
 #### Tabela 3: `observabilidade_guardrails` (camada de qualidade)
 
@@ -757,7 +758,7 @@ O pipeline implementa 5 guardrails que gravam resultados em `observabilidade_gua
 
 Rastreia arquivos verificados/ingeridos (uma linha por arquivo/ano).
 
-**Estrutura** (enriquecida com `bytes_arquivo` e `status='SKIPPED'`):
+**Estrutura** (8 colunas — `bytes_arquivo` planejado mas nao implementado):
 ```sql
 CREATE TABLE {SCHEMA_APOIO}.controle_ingestao (
     fonte               STRING,    -- dre, bpa, bpp, landing_verificacao
@@ -766,9 +767,8 @@ CREATE TABLE {SCHEMA_APOIO}.controle_ingestao (
     last_modified_cvm   TIMESTAMP, -- Last-Modified na CVM
     versao_ingestao     INT,       -- Versão sequencial
     ingest_ts           TIMESTAMP, -- Timestamp da ingestão
-    status              STRING,    -- SUCCESS (baixado), SKIPPED (já atualizado), ERROR
-    mensagem            STRING,    -- Erro ou observação
-    bytes_arquivo       BIGINT     -- Tamanho do arquivo baixado (NULL se não baixado)
+    status              STRING,    -- SUCCESS (baixado), SKIPPED (ja atualizado), ERROR
+    mensagem            STRING     -- Erro ou observação
 );
 ```
 
@@ -815,15 +815,11 @@ try:
     )
     
     # 4. MERGE no job (run level) — idempotente
+    #    Contexto capturado internamente via _capturar_contexto_job() (widgets)
     registrar_observabilidade_job(
-        job_id=job_id,
-        run_id=run_id,
-        job_name=job_name,
-        trigger_type=trigger_type,
-        inicio_ts=inicio_ts,
+        inicio_ts=_inicio_notebook,
         fim_ts=datetime.now(),
         status='SUCCESS',
-        id_run=id_run  # UUID determinístico via uuid5(job_id + run_id)
     )
     
 except Exception as e:
@@ -844,15 +840,12 @@ except Exception as e:
 
 **1. `registrar_observabilidade_execucao(id_execucao, ...)`**
 * Recebe `id_execucao` gerado pelo notebook (não gera internamente)
-* Captura `job_name`, `trigger_type`, `notebook_path` via `dbutils.jobs.getContext()` com fallback em 3 camadas:
-  1. `dbutils.notebook.getContext()`
-  2. `__file__`
-  3. Constante passada pelo notebook (safety net)
+* Captura `job_id`, `run_id`, `task_key`, `job_name`, `trigger_type` via `dbutils.widgets.get()` (dynamic value references `{{job.id}}`, `{{job.run_id}}`, `{{task.name}}`, etc. em `base_parameters` do job) com helper centralizado `_capturar_contexto_job()`
 * INSERT em `observabilidade_execucoes`
 
 **2. `registrar_observabilidade_job(job_id, run_id, ...)`**
 * MERGE idempotente em `observabilidade_jobs`
-* `id_run` determinístico: `str(uuid.uuid5(uuid.NAMESPACE_URL, f'{job_id}-{run_id}'))`
+* Chave composta: `ON t.job_id = s.job_id AND t.run_id = s.run_id` (sem UUID intermediário)
 * Atualiza `inicio_ts` (LEAST), `fim_ts` (GREATEST), `status` (monotônico)
 
 **3. `registrar_guardrail(id_execucao, ...)`**

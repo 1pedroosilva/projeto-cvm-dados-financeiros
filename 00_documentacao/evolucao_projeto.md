@@ -15,6 +15,56 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 
 
+---
+
+## 28/09/2026 - Passo 2: Observabilidade End-to-End (Contexto do Job, MERGE e Painel)
+
+### Contexto
+O Passo 2 do arquitetura.md exigia captura de contexto do job (job_id, run_id, task_key) nas tabelas de observabilidade. `os.getenv('DATABRICKS_JOB_ID')` retorna NULL em Serverless Compute — a unica forma de capturar contexto do job e via dynamic value references (`{{job.id}}`) em `base_parameters` do job, lidos no codigo via `dbutils.widgets.get()`. Separadamente, o MERGE em `observabilidade_jobs` falhava silenciosamente com `DATATYPE_MISMATCH` (TIMESTAMP vs STRING) engolido pelo try/except.
+
+### Decisoes
+* **Substituir `os.getenv()` por `dbutils.widgets.get()` com helper `_capturar_contexto_job()`** -> `os.getenv()` nao funciona em Serverless Compute; dynamic value references via `base_parameters` e a unica via. Helper centraliza a captura com fallback seguro
+* **`CAST(... AS TIMESTAMP)` no MERGE de `observabilidade_jobs`** -> O MERGE passava `inicio_ts`/`fim_ts` como STRING (via `_sql_str`), mas a tabela tem TIMESTAMP. `GREATEST(t.fim_ts, s.fim_ts)` rejeita tipos mistos. CAST no SELECT do source resolve
+* **Capturar `_inicio_notebook = datetime.now()` antes do loop, nao dentro** -> A variavel `inicio = time.time()` existia mas era per-ano (float, dentro do loop). Sem captura no escopo do notebook, `inicio_ts` e `duracao_segundos` ficavam sempre NULL em `observabilidade_jobs`
+* **Painel com 4 paginas, datasets SQL (nao metric views)** -> Dashboard de observabilidade e leitura simples de 4 tabelas — SQL direto e suficiente; metric views seria over-engineering
+
+### Implementado
+* `config_parametros.py`: helper `_capturar_contexto_job()` via `dbutils.widgets.get()`; `registrar_observabilidade_execucao()` e `registrar_observabilidade_job()` capturam contexto internamente; CAST no MERGE de `observabilidade_jobs`
+* 6 notebooks (101,102,103,201,202,203): removidos `os.getenv()` + guards; adicionado `_inicio_notebook = datetime.now()` antes do loop; `registrar_observabilidade_job(inicio_ts=_inicio_notebook, ...)` passando ambos os timestamps
+* 2 jobs (890867014997453 pipeline, 348419458655416 verificacao diaria): `base_parameters` com `JOB_ID={{job.id}}`, `JOB_NAME={{job.name}}`, `RUN_ID={{job.run_id}}`, `TASK_KEY={{task.name}}`, `TRIGGER_TYPE={{job.trigger.type}}` em todas as tasks
+* Painel "Painel Observabilidade CVM": 4 paginas (Orquestracao, Execucao, Qualidade, Ingestao), 10 widgets (3 counters + 3 bar charts + 4 tables), 5 datasets SQL, paginas duplicadas removidas, SQL corrigido (obs_jobs ORDER BY quebrado, obs_ingestao coluna `bytes_arquivo` inexistente)
+* Validacao: run 567806516956 SUCCESS — `observabilidade_jobs` com `inicio_ts`, `fim_ts`, `duracao_segundos=480s`, `status=SUCCESS`; `observabilidade_execucoes` com 36 registros (6 tasks x 6 anos), todos com `job_id`/`run_id`/`task_key`/`job_name`/`trigger_type` preenchidos
+
+### Key Insight
+`os.getenv('DATABRICKS_JOB_ID')` nao funciona em Serverless Compute — e um padrao copiado de clusters tradicionais que falha silenciosamente no runtime alvo. A unica forma de capturar contexto do job em Serverless e via dynamic value references (`{{job.id}}`) em `base_parameters` do job, lidos no codigo via `dbutils.widgets.get()`. O try/except nas funcoes de observabilidade engolia tanto o `os.getenv` falhando quanto o `DATATYPE_MISMATCH` do MERGE — dois silencios independentes na mesma cadeia de chamada. Silencio composto: quando try/except envolve uma funcao que chama outra funcao que tambem tem try/except, o erro externo nao diz nada sobre onde a cadeia quebrou.
+
+---
+
+## 27/09/2026 - Reforma do DDL e Correcao de Silencio em Observabilidade
+
+### Contexto
+O DDL (001_ddl_create_tables) acumulou migrations em cascata (ALTER TABLE condicionais, try/except) que mascaravam falhas de schema e impediam rastreio. O usuario reescreveu o DDL para ser estritamente declarativo (apenas CREATE IF NOT EXISTS). A execucao do pipeline (run 676949842358639) confirmou 7/7 tasks SUCCESS, mas a task DDL demorou 672s. Validacao da observabilidade revelou zero novos registros gravados nesta run.
+
+### Decisoes
+* **DDL estritamente declarativo (CREATE IF NOT EXISTS), sem ALTER/migrations** -> Migrations condicionais e try/except mascaravam falhas de schema. Tabelas preexistentes com schema defasado devem ser dropadas e recriadas manualmente fora do DDL
+* **Diagnostico do tempo de DDL: cold start do serverless, nao codigo** -> O DDL e a primeira task de todos os jobs (sem depends_on). Paga spin-up do Spark + handshake Unity Catalog. Tasks seguintes reaproveitam compute aquecido. Operacoes DDL medidas diretamente: 2.9s total. O %run config_parametros (38KB) nao e o gargalo — todos os notebooks fazem %run e nao tem o overhead
+* **Remover id_run das funcoes de observabilidade no config_parametros** -> As tabelas observabilidade_execucoes e observabilidade_jobs nao tem coluna id_run (removida em reformulacao anterior). As funcoes ainda referenciavam id_run no INSERT/MERGE. O try/except engolia a falha silenciosamente — exatamente o problema que a reforma tentava resolver
+
+### Implementado
+* `001_ddl_create_tables`: reescrito pelo usuario — apenas CREATE IF NOT EXISTS para schemas bronze/silver/gold/apoio e todas as tabelas. Sem ALTER, sem migrations, sem try/except. Arquivos inuteis removidos
+* `config_parametros`: 7 patches — removido `id_run` de `registrar_observabilidade_execucao` (assinatura, INSERT, VALUES) e de `registrar_observabilidade_job` (import uuid, geracao uuid5, MERGE ON trocado para `t.job_id = s.job_id AND t.run_id = s.run_id`, SELECT/INSERT/VALUES)
+* Pipeline run 676949842358639: 7/7 tasks SUCCESS (DDL 672s, Bronze 280-319s, Silver 138-162s)
+* Observabilidade pos-run: zero novos registros nas tabelas — INSERT/MERGE falhavam silenciosamente pela divergencia de schema
+
+### Pendencias
+* observabilidade_jobs foi removida do DDL (rollback estrutural); colunas landing voltaram em observabilidade_execucoes. Refatoracao do modelo de observabilidade e do config_parametros permanece pendente
+* Deploy e re-execucao necessarios para validar a correcao do id_run
+
+### Key Insight
+A reforma do DDL eliminou o Frankenstein das migrations mas expos um segundo silencio: as funcoes de observabilidade no config_parametros ainda referenciavam `id_run` (coluna removida do schema), e o try/except engolia o erro. Dois silencios independentes — um no DDL, um no config — mascaravam a mesma classe de falha. Remover try/except do DDL nao basta se as funcoes chamadas por outros notebooks continuam engolindo erros. A refatoracao do modelo de observabilidade ficou pela metade: o schema foi reformulado mas as funcoes nao foram atualizadas junto.
+
+---
+
 ## 27/09/2026 - Validacao do Redesign CARGA e Remocao de notebook_path
 
 ### Contexto
