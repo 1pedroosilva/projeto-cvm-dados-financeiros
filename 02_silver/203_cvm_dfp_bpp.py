@@ -20,7 +20,7 @@
 # MAGIC * **Detecção**: anos pendentes via `inicializar_anos_processar()` (sem HTTP para CVM)
 # MAGIC * **Bifurcação por CARGA**: `completa` (ignora idempotência, reprocessa) vs `incremental` (idempotência via `controle_ingestao`)
 # MAGIC * **Idempotência**: verificação em `controle_ingestao` por `fonte` + `ano` + `last_modified_cvm` + `status=SUCCESS` (ler de `_metadata.json`)
-# MAGIC * **Guardrails**: Bronze vazia → SKIP; unicidade da chave de negócio (`CNPJ_CIA`, `DT_REFER`, `VERSAO`, `CD_CONTA`, `GRUPO_DFP`, `ORDEM_EXERC`) → PARA
+# MAGIC * **Guardrails**: Bronze vazia → SKIP; unicidade da chave de negócio (`CNPJ_CIA`, `DT_REFER`, `CD_CONTA`, `ORDEM_EXERC` — alinhada com Window Function) → PARA
 # MAGIC * **Observabilidade**: `registrar_observabilidade_execucao()` registra sucesso/falha por ano; `registrar_observabilidade_job()` atualiza o MERGE no nivel do run (contexto do job capturado via `dbutils.widgets.get()`)
 # MAGIC * **Processamento resiliente**: try/except por ano (falha isolada não interrompe demais)
 # MAGIC
@@ -197,8 +197,8 @@ for ano in ANOS_PROCESSAR:
             "_row_num", row_number().over(window_spec)
         ).filter(col("_row_num") == 1).drop("_row_num")
         
-        # GUARDRAIL: Unicidade da chave de negocio
-        chave_negocio = ["CNPJ_CIA", "DT_REFER", "VERSAO", "CD_CONTA", "GRUPO_DFP", "ORDEM_EXERC"]
+        # GUARDRAIL: Unicidade da chave de negocio (alinhada com partitionBy da Window Function)
+        chave_negocio = ["CNPJ_CIA", "DT_REFER", "CD_CONTA", "ORDEM_EXERC"]
         df_duplicatas = df_versao_atual.groupBy(*chave_negocio).count().filter("count > 1")
         count_duplicatas = df_duplicatas.count()
 
