@@ -101,10 +101,24 @@ for ano in ANOS_PROCESSAR:
     except urllib.error.HTTPError as e:
         print(f"  ⚠️  Arquivo não encontrado na CVM (HTTP {e.code}) - pulando ano {ano}")
         erros.append((ano, f"HTTP {e.code}"))
+        registrar_ingestao_landing(
+            fonte='landing_verificacao',
+            ano=ano,
+            arquivo=f'dfp_cia_aberta_{ano}.zip',
+            status='ERROR',
+            mensagem=f"HTTP {e.code}"
+        )
         continue
     except Exception as e:
         print(f"  ⚠️  Erro ao verificar arquivo (Ano {ano}): {e} - pulando")
         erros.append((ano, str(e)))
+        registrar_ingestao_landing(
+            fonte='landing_verificacao',
+            ano=ano,
+            arquivo=f'dfp_cia_aberta_{ano}.zip',
+            status='ERROR',
+            mensagem=str(e)[:2000]
+        )
         continue
 
     print(f"  ℹ️  Last-Modified CVM: {last_modified_cvm}")
@@ -173,8 +187,27 @@ for ano in ANOS_PROCESSAR:
 
         print(f"  ✓ Metadados salvos")
         arquivos_baixados.append((ano, len(zip_bytes)))
+
+        # Registrar ingestão na tabela de controle
+        registrar_ingestao_landing(
+            fonte='landing_verificacao',
+            ano=ano,
+            arquivo=f'dfp_cia_aberta_{ano}.zip',
+            last_modified_cvm=last_modified_dt.isoformat(),
+            status='SUCCESS',
+            bytes_arquivo=len(zip_bytes)
+        )
     else:
         arquivos_ignorados.append(ano)
+
+        # Registrar skip na tabela de controle
+        registrar_ingestao_landing(
+            fonte='landing_verificacao',
+            ano=ano,
+            arquivo=f'dfp_cia_aberta_{ano}.zip',
+            last_modified_cvm=last_modified_dt.isoformat(),
+            status='SKIPPED'
+        )
 
 print(f"\n{'=' * 80}")
 print("VERIFICAÇÃO CONCLUÍDA")
@@ -263,21 +296,6 @@ print("=" * 80)
 
 import uuid
 
-# Capturar contexto do job (se disponível)
-job_id = None
-run_id = None
-task_key = None
-try:
-    _jid = os.getenv('DATABRICKS_JOB_ID')
-    if _jid:
-        job_id = int(_jid)
-    _rid = os.getenv('DATABRICKS_JOB_RUN_ID')
-    if _rid:
-        run_id = int(_rid)
-    task_key = os.getenv('DATABRICKS_JOB_TASK_KEY')
-except Exception:
-    pass
-
 # Determinar status final
 if erros and not arquivos_baixados:
     status_final = 'ERROR'
@@ -305,47 +323,30 @@ else:
 _fim_execucao = datetime.now()
 _duracao = (_fim_execucao - _inicio_execucao).total_seconds()
 
-# Helper para formatar strings SQL
-def _sql_str(val):
-    if val is None:
-        return 'NULL'
-    return "'" + str(val).replace("'", "''") + "'"
+# Gerar ID único da execução
+id_execucao = str(uuid.uuid4())
 
-# Inserir registro
-id_exec = str(uuid.uuid4())
-notebook_path = '/Workspace/Users/1pedro.osilva@gmail.com/projeto-cvm-dados-financeiros/05_apoio/004_verificacao_diaria_landing'
+# Registrar execução na tabela de observabilidade (função centralizada)
+registrar_observabilidade_execucao(
+    id_execucao=id_execucao,
+    etapa='verificacao',
+    fonte='landing',
+    ano=None,
+    inicio_epoch=_inicio_execucao.timestamp(),
+    duracao_segundos=_duracao,
+    status=status_final,
+    registros_processados=len(arquivos_baixados),
+    mensagem_erro=mensagem_erro,
+)
 
-spark.sql(f"""
-    INSERT INTO {CATALOG_NAME}.{SCHEMA_APOIO}.observabilidade_execucoes
-        (id_execucao, job_id, run_id, task_key, notebook_path,
-         etapa, fonte, status,
-         arquivos_verificados, arquivos_baixados, arquivos_arquivados, arquivos_ignorados,
-         bytes_baixados, bytes_arquivados,
-         mensagem_erro, inicio_ts, fim_ts, duracao_segundos, created_at)
-    VALUES (
-        {_sql_str(id_exec)},
-        {job_id or 'NULL'},
-        {run_id or 'NULL'},
-        {_sql_str(task_key)},
-        {_sql_str(notebook_path)},
-        {_sql_str('verificacao')},
-        {_sql_str('landing')},
-        {_sql_str(status_final)},
-        {len(ANOS_PROCESSAR)},
-        {len(arquivos_baixados)},
-        {len(arquivos_arquivados)},
-        {len(arquivos_ignorados)},
-        {total_bytes_baixados},
-        {total_bytes_arquivados},
-        {_sql_str(mensagem_erro)},
-        {_sql_str(_inicio_execucao.strftime('%Y-%m-%d %H:%M:%S'))},
-        {_sql_str(_fim_execucao.strftime('%Y-%m-%d %H:%M:%S'))},
-        {_duracao},
-        current_timestamp()
-    )
-""")
+# Registrar job na tabela de observabilidade (MERGE idempotente)
+registrar_observabilidade_job(
+    inicio_ts=_inicio_execucao,
+    fim_ts=_fim_execucao,
+    status=status_final,
+)
 
-print(f"\n✅ Registro de observabilidade criado: {id_exec}")
+print(f"\n✅ Registro de observabilidade criado: {id_execucao}")
 print(f"   Status: {status_final}")
 print(f"   Duração: {_duracao:.1f}s")
 print(f"   Arquivos: {len(arquivos_baixados)} baixados, {len(arquivos_arquivados)} arquivados, {len(arquivos_ignorados)} ignorados")

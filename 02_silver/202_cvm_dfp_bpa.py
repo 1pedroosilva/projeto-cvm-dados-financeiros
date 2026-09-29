@@ -21,7 +21,7 @@
 # MAGIC * **Bifurcação por CARGA**: `completa` (ignora idempotência, reprocessa) vs `incremental` (idempotência via `controle_ingestao`)
 # MAGIC * **Idempotência**: verificação em `controle_ingestao` por `fonte` + `ano` + `last_modified_cvm` + `status=SUCCESS` (ler de `_metadata.json`)
 # MAGIC * **Guardrails**: Bronze vazia → SKIP; unicidade da chave de negócio (`CNPJ_CIA`, `DT_REFER`, `VERSAO`, `CD_CONTA`, `GRUPO_DFP`, `ORDEM_EXERC`) → PARA
-# MAGIC * **Observabilidade**: `registrar_observabilidade_execucao()` registra sucesso/falha por ano
+# MAGIC * **Observabilidade**: `registrar_observabilidade_execucao()` registra sucesso/falha por ano; `registrar_observabilidade_job()` atualiza o MERGE no nivel do run (contexto do job capturado via `dbutils.widgets.get()`)
 # MAGIC * **Processamento resiliente**: try/except por ano (falha isolada não interrompe demais)
 # MAGIC
 # MAGIC ## Transformações Aplicadas
@@ -116,6 +116,7 @@ id_execucao = str(uuid.uuid4())
 
 anos_sucesso = []
 anos_falha = []
+_inicio_notebook = datetime.now()
 
 for ano in ANOS_PROCESSAR:
     inicio = time.time()
@@ -323,6 +324,7 @@ for ano in ANOS_PROCESSAR:
         
         # Registrar observabilidade (Grupo B)
         registrar_observabilidade_execucao(
+            id_execucao=id_execucao,
             etapa='silver',
             fonte='bpa_silver',
             ano=ano,
@@ -339,6 +341,7 @@ for ano in ANOS_PROCESSAR:
         
         # Registrar observabilidade (Grupo B)
         registrar_observabilidade_execucao(
+            id_execucao=id_execucao,
             etapa='silver',
             fonte='bpa_silver',
             ano=ano,
@@ -368,6 +371,31 @@ for ano in ANOS_PROCESSAR:
         except:
             pass  # Se falhar ao registrar, não interromper processamento
 
+
 # COMMAND ----------
 
 # DBTITLE 1,RELATÓRIO FINAL
+# RELATÓRIO FINAL
+logger.info(f"\n{'='*80}")
+logger.info(f"SILVER BPA - RELATÓRIO FINAL")
+logger.info("="*80)
+logger.info(f"✓ Sucesso: {anos_sucesso}")
+if anos_falha:
+    logger.warning(f"❌ Falhas: {[ano for ano, _ in anos_falha]}")
+    for ano, erro in anos_falha:
+        logger.warning(f"   • Ano {ano}: {erro}")
+else:
+    logger.info("✓ Nenhuma falha")
+logger.info("="*80)
+
+# Registrar job na tabela de observabilidade (MERGE idempotente)
+registrar_observabilidade_job(
+    inicio_ts=_inicio_notebook,
+    fim_ts=datetime.now(),
+    status='ERROR' if anos_falha else 'SUCCESS',
+)
+
+# Garantir falha de job quando há períodos não processados
+if anos_falha:
+    anos_falhados = [ano for ano, _ in anos_falha]
+    raise RuntimeError(f"Falha ao processar {len(anos_falha)} ano(s): {anos_falhados}")
