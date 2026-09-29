@@ -3,6 +3,7 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
+# DBTITLE 1,CÓDIGO PRINCIPAL
 # ============================================================================
 # Configuração Centralizada - Pipeline CVM
 # ============================================================================
@@ -307,34 +308,69 @@ FONTE_TABELA_DESTINO = {
 # FUNÇÕES AUXILIARES
 # ============================================================================
 
+def _capturar_contexto_job():
+    """Captura contexto do job (job_id, run_id, task_key, job_name, trigger_type).
+    
+    Prioridade: dbutils.widgets (dynamic value references) > os.getenv > None.
+    Em Serverless Compute, os.getenv nao funciona — widgets sao a forma correta.
+    """
+    def _widget_or_env(widget_name, env_name=None):
+        try:
+            val = dbutils.widgets.get(widget_name)
+            if val and val.strip():
+                return val.strip()
+        except Exception:
+            pass
+        if env_name:
+            val = os.getenv(env_name)
+            if val and val.strip():
+                return val.strip()
+        return None
+    
+    job_id_str = _widget_or_env('JOB_ID', 'DATABRICKS_JOB_ID')
+    run_id_str = _widget_or_env('RUN_ID', 'DATABRICKS_JOB_RUN_ID')
+    task_key = _widget_or_env('TASK_KEY', 'DATABRICKS_JOB_TASK_KEY')
+    job_name = _widget_or_env('JOB_NAME', 'DATABRICKS_JOB_NAME')
+    trigger_type = _widget_or_env('TRIGGER_TYPE', 'DATABRICKS_JOB_TRIGGER_TYPE')
+    
+    job_id = int(job_id_str) if job_id_str else None
+    run_id = int(run_id_str) if run_id_str else None
+    
+    return job_id, run_id, task_key, job_name, trigger_type
+
 def registrar_observabilidade_execucao(
+    id_execucao: str,
     etapa: str,
     fonte: str,
     ano,
     inicio_epoch: float,
     duracao_segundos: float,
     status: str,
+    job_name: str = None,
+    trigger_type: str = None,
     registros_processados=None,
     mensagem_erro=None,
     tipo_erro=None,
-    last_modified_cvm=None,
 ):
     """Registra execução na tabela observabilidade_execucoes.
     
     Centraliza INSERT em observabilidade_execucoes para todos notebooks do pipeline.
+    Recebe id_execucao gerado pelo notebook (não gera internamente).
     Captura contexto do job (job_id, run_id, task_key) automaticamente via env vars.
     
     Args:
+        id_execucao: UUID da execução (gerado pelo notebook, não pela função)
         etapa: 'bronze', 'silver', 'verificacao', 'download'
         fonte: 'dre', 'bpa', 'bpp', 'dre_silver', etc.
         ano: Ano processado (int) ou None se múltiplos anos
         inicio_epoch: timestamp de início (float de time.time())
         duracao_segundos: duração em segundos (float)
         status: 'SUCCESS', 'ERROR', 'SKIPPED', 'PARTIAL'
+        job_name: Nome do job (opcional, capturado via env se omitido)
+        trigger_type: Tipo de trigger (opcional, capturado via env se omitido)
         registros_processados: número de registros (opcional)
         mensagem_erro: mensagem de erro (opcional, até 2000 chars)
         tipo_erro: tipo do erro (opcional, ex: 'ValueError')
-        last_modified_cvm: last_modified do arquivo CVM (opcional, ISO format)
     """
     import uuid
     
@@ -343,27 +379,12 @@ def registrar_observabilidade_execucao(
             return 'NULL'
         return "'" + str(val).replace("'", "''") + "'"
     
-    # Capturar contexto do job
-    job_id = None
-    run_id = None
-    task_key = None
-    try:
-        _jid = os.getenv('DATABRICKS_JOB_ID')
-        if _jid:
-            job_id = int(_jid)
-        _rid = os.getenv('DATABRICKS_JOB_RUN_ID')
-        if _rid:
-            run_id = int(_rid)
-        task_key = os.getenv('DATABRICKS_JOB_TASK_KEY')
-    except Exception:
-        pass
-    
-    id_exec = str(uuid.uuid4())
-    notebook_path = None
-    try:
-        notebook_path = str(dbutils.notebook.getContext().notebookPath())
-    except Exception:
-        pass
+    # Capturar contexto do job via widgets (dynamic value references) com fallback
+    job_id, run_id, task_key, _job_name_ctx, _trigger_ctx = _capturar_contexto_job()
+    if job_name is None:
+        job_name = _job_name_ctx
+    if trigger_type is None:
+        trigger_type = _trigger_ctx
     
     inicio_ts = datetime.fromtimestamp(inicio_epoch, tz=timezone.utc)
     fim_ts = datetime.fromtimestamp(inicio_epoch + duracao_segundos, tz=timezone.utc)
@@ -371,28 +392,27 @@ def registrar_observabilidade_execucao(
     try:
         spark.sql(f"""
             INSERT INTO {CATALOG_NAME}.{SCHEMA_APOIO}.observabilidade_execucoes
-                (id_execucao, job_id, run_id, task_key, notebook_path,
-                 etapa, fonte, ano, status,
-                 inicio_ts, fim_ts, duracao_segundos,
+                (id_execucao, job_id, job_name, run_id, task_key,
+                 etapa, fonte, ano, trigger_type,
+                 inicio_ts, fim_ts, duracao_segundos, status,
                  registros_processados,
-                 last_modified_cvm,
                  tipo_erro, mensagem_erro,
                  created_at)
             VALUES (
-                {_sql_str(id_exec)},
+                {_sql_str(id_execucao)},
                 {job_id or 'NULL'},
+                {_sql_str(job_name)},
                 {run_id or 'NULL'},
                 {_sql_str(task_key)},
-                {_sql_str(notebook_path)},
                 {_sql_str(etapa)},
                 {_sql_str(fonte)},
                 {ano if ano is not None else 'NULL'},
-                {_sql_str(status)},
+                {_sql_str(trigger_type)},
                 {_sql_str(inicio_ts.strftime('%Y-%m-%d %H:%M:%S'))},
                 {_sql_str(fim_ts.strftime('%Y-%m-%d %H:%M:%S'))},
                 {duracao_segundos},
+                {_sql_str(status)},
                 {registros_processados if registros_processados is not None else 'NULL'},
-                {_sql_str(last_modified_cvm)},
                 {_sql_str(tipo_erro)},
                 {_sql_str(mensagem_erro)},
                 current_timestamp()
@@ -401,6 +421,150 @@ def registrar_observabilidade_execucao(
     except Exception as e:
         # Observabilidade não deve quebrar o pipeline
         print(f"⚠️  Erro ao registrar observabilidade: {e}")
+
+
+def registrar_observabilidade_job(
+    job_id: int = None,
+    run_id: int = None,
+    job_name: str = None,
+    trigger_type: str = None,
+    inicio_ts=None,
+    fim_ts=None,
+    status: str = 'SUCCESS',
+):
+    """MERGE idempotente em observabilidade_jobs.
+    
+    Cada notebook atualiza o registro do run ao qual pertence.
+    Chave composta: (job_id, run_id).
+    
+    - inicio_ts: LEAST(t.inicio_ts, source.inicio_ts) — primeira task estabelece
+    - fim_ts: GREATEST(t.fim_ts, source.fim_ts) — última task atualiza
+    - status: monotônico — uma vez ERROR, sempre ERROR
+    """
+    def _sql_str(val):
+        if val is None:
+            return 'NULL'
+        return "'" + str(val).replace("'", "''") + "'"
+    
+    # Capturar contexto do job se não fornecido via parâmetros
+    if job_id is None or run_id is None or job_name is None or trigger_type is None:
+        _jid, _rid, _tk, _jn, _tt = _capturar_contexto_job()
+        if job_id is None:
+            job_id = _jid
+        if run_id is None:
+            run_id = _rid
+        if job_name is None:
+            job_name = _jn
+        if trigger_type is None:
+            trigger_type = _tt
+    
+    if job_id is None or run_id is None:
+        print("⚠️  Observabilidade: job_id/run_id não disponíveis — pulando MERGE em observabilidade_jobs")
+        return
+    
+    duracao_segundos = None
+    if inicio_ts is not None and fim_ts is not None:
+        if isinstance(inicio_ts, (int, float)):
+            inicio_ts = datetime.fromtimestamp(inicio_ts, tz=timezone.utc)
+        if isinstance(fim_ts, (int, float)):
+            fim_ts = datetime.fromtimestamp(fim_ts, tz=timezone.utc)
+        duracao_segundos = (fim_ts - inicio_ts).total_seconds()
+    
+    def _fmt_ts(ts):
+        if ts is None:
+            return None
+        if hasattr(ts, 'strftime'):
+            return ts.strftime('%Y-%m-%d %H:%M:%S')
+        return str(ts)
+    
+    try:
+        spark.sql(f"""
+            MERGE INTO {CATALOG_NAME}.{SCHEMA_APOIO}.observabilidade_jobs AS t
+            USING (
+                SELECT
+                    {job_id} AS job_id,
+                    {_sql_str(job_name)} AS job_name,
+                    {run_id} AS run_id,
+                    {_sql_str(trigger_type)} AS trigger_type,
+                    CAST({_sql_str(_fmt_ts(inicio_ts))} AS TIMESTAMP) AS inicio_ts,
+                    CAST({_sql_str(_fmt_ts(fim_ts))} AS TIMESTAMP) AS fim_ts,
+                    {duracao_segundos if duracao_segundos is not None else 'NULL'} AS duracao_segundos,
+                    {_sql_str(status)} AS status,
+                    current_timestamp() AS created_at
+            ) AS s
+            ON t.job_id = s.job_id AND t.run_id = s.run_id
+            WHEN MATCHED THEN UPDATE SET
+                inicio_ts = LEAST(t.inicio_ts, s.inicio_ts),
+                fim_ts = GREATEST(t.fim_ts, s.fim_ts),
+                duracao_segundos = 
+                    CASE WHEN t.inicio_ts IS NOT NULL AND s.inicio_ts IS NOT NULL 
+                         AND t.fim_ts IS NOT NULL AND s.fim_ts IS NOT NULL
+                    THEN unix_timestamp(GREATEST(t.fim_ts, s.fim_ts)) - unix_timestamp(LEAST(t.inicio_ts, s.inicio_ts))
+                    ELSE s.duracao_segundos END,
+                status = CASE WHEN t.status = 'ERROR' THEN 'ERROR' ELSE s.status END
+            WHEN NOT MATCHED THEN INSERT (
+                job_id, job_name, run_id, trigger_type,
+                inicio_ts, fim_ts, duracao_segundos, status, created_at
+            ) VALUES (
+                s.job_id, s.job_name, s.run_id, s.trigger_type,
+                s.inicio_ts, s.fim_ts, s.duracao_segundos, s.status, s.created_at
+            )
+        """)
+    except Exception as e:
+        # Observabilidade não deve quebrar o pipeline
+        print(f"⚠️  Erro ao registrar job: {e}")
+
+
+def registrar_ingestao_landing(
+    fonte: str,
+    ano: int,
+    arquivo: str,
+    last_modified_cvm=None,
+    versao_ingestao=None,
+    status: str = 'SUCCESS',
+    mensagem: str = None,
+    bytes_arquivo=None,
+):
+    """INSERT centralizado em controle_ingestao.
+    
+    Usado por Bronze (101/102/103) e 004 (verificação diária).
+    Substitui os INSERTs diretos em SQL espalhados pelos notebooks.
+    
+    Args:
+        fonte: 'dre', 'bpa', 'bpp', 'landing_verificacao', 'dre_silver', etc.
+        ano: Ano fiscal
+        arquivo: Nome do arquivo processado
+        last_modified_cvm: Last-Modified da CVM (opcional)
+        versao_ingestao: Versão sequencial (opcional)
+        status: 'SUCCESS', 'SKIPPED', 'ERROR'
+        mensagem: Mensagem de erro ou observação (opcional)
+        bytes_arquivo: Tamanho do arquivo em bytes (opcional)
+    """
+    def _sql_str(val):
+        if val is None:
+            return 'NULL'
+        return "'" + str(val).replace("'", "''") + "'"
+    
+    try:
+        spark.sql(f"""
+            INSERT INTO {CATALOG_NAME}.{SCHEMA_APOIO}.controle_ingestao
+                (fonte, ano, arquivo, last_modified_cvm, versao_ingestao,
+                 ingest_ts, status, mensagem, bytes_arquivo)
+            VALUES (
+                {_sql_str(fonte)},
+                {ano},
+                {_sql_str(arquivo)},
+                {_sql_str(last_modified_cvm)},
+                {versao_ingestao if versao_ingestao is not None else 'NULL'},
+                current_timestamp(),
+                {_sql_str(status)},
+                {_sql_str(mensagem)},
+                {bytes_arquivo if bytes_arquivo is not None else 'NULL'}
+            )
+        """)
+    except Exception as e:
+        # Controle de ingestão não deve quebrar o pipeline
+        print(f"⚠️  Erro ao registrar ingestão: {e}")
 
 
 def registrar_guardrail(

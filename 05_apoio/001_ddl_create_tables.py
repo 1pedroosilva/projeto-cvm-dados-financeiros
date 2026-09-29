@@ -308,6 +308,24 @@ COMMENT 'Observabilidade - validações de qualidade de dados do pipeline CVM'
 
 # COMMAND ----------
 
+# DBTITLE 1,APOIO - observabilidade_jobs
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.observabilidade_jobs (
+  job_id BIGINT COMMENT 'ID do job no Databricks',
+  job_name STRING COMMENT 'Nome do job',
+  run_id BIGINT COMMENT 'ID da execução (run) do job',
+  trigger_type STRING COMMENT 'SCHEDULED, ONE_TIME, etc.',
+  inicio_ts TIMESTAMP COMMENT 'Início do run (primeira task)',
+  fim_ts TIMESTAMP COMMENT 'Fim do run (última task)',
+  duracao_segundos DOUBLE COMMENT 'Wall-clock total (inclui gaps)',
+  status STRING COMMENT 'SUCCESS, ERROR, PARTIAL',
+  created_at TIMESTAMP COMMENT 'Timestamp de criação do registro'
+) USING DELTA
+COMMENT 'Rastreia execuções de jobs (uma linha por run). MERGE idempotente via (job_id, run_id).'
+""")
+
+# COMMAND ----------
+
 # DBTITLE 1,CONFIRMAÇÃO FINAL
 print("✅ DDL concluído\n")
 
