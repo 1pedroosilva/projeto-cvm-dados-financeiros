@@ -154,31 +154,36 @@ databricks bundle deploy -t test
 databricks bundle run testes_integracao_cvm -t test
 ```
 
-## Validações e Qualidade
+## Guardrails
 
-### Guardrails
+O pipeline aplica validações automáticas antes de gravar em cada camada. Os resultados são registrados em `observabilidade_guardrails` via `registrar_guardrail()`, com resultado PASS, FAIL ou WARN, vinculados à execução pelo `id_execucao`.
 
-**Bronze**:
-* Arquivo vazio → PARA (preserva Bronze)
-* Schema inválido (colunas críticas faltando) → PARA
-* Implementação: função `validar_e_projetar_schema()` em `config_parametros.py`
+**Bronze** (`01_bronze/`):
+* Arquivo vazio → interrompe a execução (preserva Bronze intacta)
+* Coluna essencial faltando → interrompe a execução
+* Coluna extra na fonte → descartada silenciosamente
+* Reconciliação de contagem → compara registros gravados com total na tabela
 
-**Silver**:
-* Bronze vazia para o ano → SKIP (preserva Silver)
+**Silver** (`02_silver/`):
+* Bronze vazia para o ano → salta o processamento (preserva Silver intacta)
+* Unicidade de chave de negócio → verifica duplicatas antes de gravar
 
 Detalhes em [`00_documentacao/tecnica/guardrails.md`](00_documentacao/tecnica/guardrails.md).
 
-### Rastreamento
+## Observabilidade
 
-Tabela de controle `{SCHEMA_APOIO}.controle_ingestao` (via config_parametros) registra:
-* Cada ingestão (fonte, ano, timestamp, versão)
-* Erros (status ERROR, mensagem truncada em 500 chars)
-* Metadados da fonte (last_modified via HTTP)
+Quatro tabelas no schema de apoio registram o estado do pipeline em tempo de execução:
 
-Tabela `{SCHEMA_APOIO}.observabilidade_execucoes` (via config_parametros) registra:
-* Métricas detalhadas de execução (etapa, fonte, duração, registros processados)
-* Contexto do job (job_id, run_id, task_key)
-* Status (SUCCESS, ERROR, SKIPPED, PARTIAL)
+* `controle_ingestao` — uma linha por ingestão de arquivo (fonte, ano, versão, `last_modified_cvm`, status)
+* `observabilidade_execucoes` — métricas por task: etapa, fonte, ano, duração, registros processados, contexto do job (`job_id`, `run_id`, `task_key`)
+* `observabilidade_jobs` — um registro por run, atualizado via MERGE idempotente a cada task; consolida início, fim e status do job completo
+* `observabilidade_guardrails` — resultados dos guardrails vinculados à execução pelo `id_execucao`
+
+O Painel de Observabilidade CVM, construído no Databricks, consulta essas tabelas. As abas implementadas são:
+
+**Orquestração** — status dos últimos 7 dias: indicador de saúde do pipeline, duração média e taxa de sucesso; histórico de duração por execução; tempo médio por etapa (Bronze-BPA, Bronze-BPP, Bronze-DRE, Silver-BPA, Silver-BPP, Silver-DRE, Verificação Diária); tabela de execuções com filtros por ambiente e tipo.
+
+**Execução** — volume de registros processados, throughput em registros por minuto, duração do run e número de fontes processadas; throughput por fonte e etapa (bronze e silver); cobertura de fontes por ano (2021–2026); distribuição de duração (s) × registros por execução por etapa; tendência de duração total por run.
 
 ![Painel de Observabilidade CVM](assets/painel_obs_cvm.gif)
 
