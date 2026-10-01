@@ -1,4 +1,4 @@
-﻿# Evolução do Projeto CVM
+# Evolução do Projeto CVM
 
 ## Propósito deste Documento
 
@@ -14,6 +14,28 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 4. **Key Insight**: 1 aprendizado realmente importante
 
 
+
+---
+
+## 30/09/2026 - Versionamento do Dashboard de Observabilidade no Git (DAB + Multi-ambiente)
+
+### Contexto
+O Painel Observabilidade CVM existia como um asset isolado no workspace, fora do Git folder do projeto. O projeto ja usa Declarative Automation Bundles (databricks.yml) com padrao `include: resources/**/*.yml`, mas apenas jobs eram versionados. Para versionar o dashboard, era necessario exporta-lo como `.lvdash.json` e declara-lo como recurso do bundle. Adicionalmente, as 47 referencias ao schema `workspace.proj_cvm_dev_05_apoio` nas queries do dashboard estavam hardcoded para dev, impedindo deploy em prod/test sem alteracao manual.
+
+### Decisoes
+* **Exportar via Python SDK (`w.lakeview.get().serialized_dashboard`), nao CLI** -> O `databricks` CLI so funciona no web terminal; em `executeCode` (shell) retorna erro. O Python SDK e a unica via programatica para exportar Lakeview dashboards
+* **Template `.tpl` + script de pre-processamento para multi-ambiente** -> DABs nao fazem substituicao de variaveis dentro de `.lvdash.json` — o JSON e tratado como blob opaco. A unica forma de parametrizar queries por ambiente e pre-processing: template com `{{SCHEMA_PREFIX}}` + script que substitui por `proj_cvm_dev`/`proj_cvm_prod`/`proj_cvm_test`
+* **Manter `.lvdash.json` (versao dev) versionado no Git, nao gitignored** -> Mais simples e funciona out-of-the-box para dev. Para prod/test, o script `gen_dashboard.py` regenera o arquivo antes do deploy. Gitignoring exigiria passo extra antes de todo deploy, ate para dev
+
+### Implementado
+* `resources/dashboards/painel_observabilidade.lvdash.json`: exportado via `w.lakeview.get()` — 94.720 bytes, 5 paginas, 31 datasets
+* `resources/dashboards/painel_observabilidade.lvdash.json.tpl`: template com `{{SCHEMA_PREFIX}}` substituindo 47 ocorrencias de `proj_cvm_dev`
+* `resources/dashboards/dashboard_observabilidade.yml`: declara recurso `painel_observabilidade` no DAB com `warehouse_id` e tags
+* `scripts/gen_dashboard.py`: script que le o `.tpl`, substitui `{{SCHEMA_PREFIX}}` pelo prefixo do target, valida JSON e escreve o `.lvdash.json`
+* Commit e push na branch `main`: 4 arquivos, mensagem `feat(apoio): Adiciona versionamento do dashboard de observabilidade no DAB`
+
+### Key Insight
+DABs nao fazem substituicao de variaveis dentro de arquivos `.lvdash.json` — o JSON e tratado como blob opaco pelo bundler. A unica forma de parametrizar SQL queries de um dashboard Lakeview para multiplos ambientes e pre-processing externo: um template com placeholders + um script que gera o arquivo final por target. O `databricks` CLI so funciona no web terminal; em `executeCode` (shell) ele rejeita a execucao. Para exportar dashboards Lakeview programaticamente, usar `w.lakeview.get(dashboard_id).serialized_dashboard` do Python SDK.
 
 ---
 
