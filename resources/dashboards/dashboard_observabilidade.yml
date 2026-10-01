@@ -1,0 +1,12 @@
+# Dashboard de Observabilidade CVM
+# Painel com métricas de orquestração, execução, qualidade e ingestão
+
+resources:
+  dashboards:
+    painel_observabilidade:
+      path: painel_observabilidade.lvdash.json
+      display_name: "Painel Observabilidade CVM"
+      warehouse_id: 4bab97bbd56ff57b
+      tags:
+        projeto: cvm
+        ambiente: ${bundle.target}
