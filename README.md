@@ -8,6 +8,8 @@ Pipeline de ingestão e transformação de demonstrações financeiras de compan
 
 > **📋 [Estado Atual do Projeto](00_documentacao/tecnica/estado_atual.md)** — Retrato de hoje: jobs ativos, notebooks em produção, utilitários e aposentados (sem histórico).
 
+![Painel de Observabilidade CVM](assets/painel_obs_cvm.gif)
+
 ## O que é este projeto
 
 Processa demonstrações financeiras padronizadas (DFP) da CVM:
