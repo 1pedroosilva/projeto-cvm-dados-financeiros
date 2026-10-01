@@ -185,6 +185,8 @@ O Painel de Observabilidade CVM, construído no Databricks, consulta essas tabel
 
 **Execução** — volume de registros processados, throughput em registros por minuto, duração do run e número de fontes processadas; throughput por fonte e etapa (bronze e silver); cobertura de fontes por ano (2021–2026); distribuição de duração (s) × registros por execução por etapa; tendência de duração total por run.
 
+O dashboard está versionado em `resources/dashboards/` e declarado no bundle via `dashboard_observabilidade.yml`. Para gerar o `.lvdash.json` de um target antes do deploy: `python scripts/gen_dashboard.py <dev|test|prod>`.
+
 ![Painel de Observabilidade CVM](assets/painel_obs_cvm.gif)
 
 ## Fonte de Dados
