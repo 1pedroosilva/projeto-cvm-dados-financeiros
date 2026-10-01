@@ -8,8 +8,6 @@ Pipeline de ingestão e transformação de demonstrações financeiras de compan
 
 > **📋 [Estado Atual do Projeto](00_documentacao/tecnica/estado_atual.md)** — Retrato de hoje: jobs ativos, notebooks em produção, utilitários e aposentados (sem histórico).
 
-![Painel de Observabilidade CVM](assets/painel_obs_cvm.gif)
-
 ## O que é este projeto
 
 Processa demonstrações financeiras padronizadas (DFP) da CVM:
@@ -181,6 +179,8 @@ Tabela `{SCHEMA_APOIO}.observabilidade_execucoes` (via config_parametros) regist
 * Métricas detalhadas de execução (etapa, fonte, duração, registros processados)
 * Contexto do job (job_id, run_id, task_key)
 * Status (SUCCESS, ERROR, SKIPPED, PARTIAL)
+
+![Painel de Observabilidade CVM](assets/painel_obs_cvm.gif)
 
 ## Fonte de Dados
 
