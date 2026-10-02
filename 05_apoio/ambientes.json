@@ -20,7 +20,7 @@
   "carga": {
     "_sobre": "QUANTO processar. Eixo independente do ambiente. As quatro combinacoes sao validas.",
     "valores_aceitos": ["incremental", "completa"],
-    "padrao": "completa",
+    "padrao": "incremental",
     "precedencia": [
       "widget:CARGA",
       "variavel_ambiente:CARGA",
