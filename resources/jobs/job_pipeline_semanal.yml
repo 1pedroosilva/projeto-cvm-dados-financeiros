@@ -25,6 +25,11 @@ resources:
             notebook_path: ../../05_apoio/001_ddl_create_tables.py
             base_parameters:
               AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
 
         - task_key: bronze_dre
           depends_on:
@@ -33,6 +38,11 @@ resources:
             notebook_path: ../../01_bronze/101_cvm_dfp_dre.py
             base_parameters:
               AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
 
         - task_key: bronze_bpa
           depends_on:
@@ -41,6 +51,11 @@ resources:
             notebook_path: ../../01_bronze/102_cvm_dfp_bpa.py
             base_parameters:
               AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
 
         - task_key: bronze_bpp
           depends_on:
@@ -49,6 +64,11 @@ resources:
             notebook_path: ../../01_bronze/103_cvm_dfp_bpp.py
             base_parameters:
               AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
 
         - task_key: silver_dre
           depends_on:
@@ -57,6 +77,11 @@ resources:
             notebook_path: ../../02_silver/201_cvm_dfp_dre.py
             base_parameters:
               AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
 
         - task_key: silver_bpa
           depends_on:
@@ -65,6 +90,11 @@ resources:
             notebook_path: ../../02_silver/202_cvm_dfp_bpa.py
             base_parameters:
               AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
 
         - task_key: silver_bpp
           depends_on:
@@ -73,6 +103,11 @@ resources:
             notebook_path: ../../02_silver/203_cvm_dfp_bpp.py
             base_parameters:
               AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
 
       tags:
         projeto: cvm

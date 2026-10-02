@@ -24,6 +24,11 @@ resources:
             notebook_path: ../../05_apoio/001_ddl_create_tables.py
             base_parameters:
               AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
 
         - task_key: verificacao_landing
           depends_on:
@@ -32,6 +37,11 @@ resources:
             notebook_path: ../../05_apoio/004_verificacao_diaria_landing.py
             base_parameters:
               AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
 
       tags:
         projeto: cvm
