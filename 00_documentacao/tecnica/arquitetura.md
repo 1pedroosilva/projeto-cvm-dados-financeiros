@@ -87,7 +87,7 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 **Localização**: Unity Catalog Volume `{VOLUME_LANDING_DFP}/{ano}/`
 
 **Pipeline**:
-1. **Download** via `003_download_cvm_para_landing.py`
+1. **Download** via `004_verificacao_diaria_landing.py`
    - URL: `https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/DFP/DADOS/dfp_cia_aberta_{ano}.zip`
    - Destino: Volume UC (particionado por ano)
    - **Estratégia Spark Connect/Serverless**:
@@ -228,7 +228,7 @@ O projeto segue a arquitetura medalhão, um padrão consolidado em lakehouse que
 5. Aplica janela temporal (`JANELA_ANOS_RELEVANTE`)
 6. Consolida 6 fontes: 3 Bronze + 3 Silver
 
-> **Nota**: O notebook `000_orquestrador_pipeline.py` existe em `05_apoio/` mas foi removido do job de produção (890867014997453) em 19/09/2026. A detecção agora é distribuída — cada notebook chama `inicializar_anos_processar()` independentemente. Busca por arquivos novos na CVM (HTTP) é responsabilidade do job diário de download.
+> **Nota**: O notebook `000_orquestrador_pipeline.py` foi removido do job de produção (890867014997453) em 19/09/2026 e posteriormente excluído do workspace. A detecção agora é distribuída — cada notebook chama `inicializar_anos_processar()` independentemente. Busca por arquivos novos na CVM (HTTP) é responsabilidade do job diário de download.
 >
 > **004_verificacao_diaria_landing**: Itera a janela temporal diretamente (`range(ano_atual - JANELA_ANOS_RELEVANTE, ano_atual + 1)`), sem depender de `inicializar_anos_processar()`. Esta independência é intencional: o notebook que descobre mudanças na fonte não pode receber a lista de quem já assumiu que nada mudou.
 
@@ -298,10 +298,8 @@ ANOS_PROCESSAR = inicializar_anos_processar()
 * Versionamento automático de arquivos atualizados
 
 **Scripts de Apoio** (`05_apoio/`):
-* `000_orquestrador_pipeline.py` - Detecção inteligente de períodos
 * `001_ddl_create_tables.py` - Criação de schemas e tabelas Unity Catalog
-* `002_ddl_controle_ingestao.py` - Tabela de controle de ingestão
-* `003_download_cvm_para_landing.py` - Download e preservação na Landing Zone
+* `004_verificacao_diaria_landing.py` - Download incremental CVM (HEAD + Last-Modified)
 * `099_ddl_table_comments.py` - Documentação de metadados
 * `config_parametros.py` - Configuração centralizada
 
@@ -867,11 +865,18 @@ Antes da implementação das 4 tabelas, a `observabilidade_execucoes` continha c
 * **Logs**: Logs estruturados via `logging.basicConfig` (timestamp, nível, mensagem)
 * **System Tables**: `system.lakeflow.job_run_timeline` disponível mas não usado como pilar (observabilidade própria via instrumentação)
 
+### Dashboard de Observabilidade
+
+O painel Lakeview de observabilidade (4 páginas: Orquestração, Execução, Qualidade, Ingestão) é gerado a partir de um template versionado no repositório:
+
+* **Template**: `resources/dashboards/painel_observabilidade.lvdash.json.tpl` — JSON com placeholder `{{SCHEMA_PREFIX}}` nos nomes de tabela
+* **Gerador**: `scripts/gen_dashboard.py` — substitui `{{SCHEMA_PREFIX}}` pelo prefixo do ambiente (ex.: `proj_cvm_dev` para dev) e valida o JSON gerado
+* **Saída**: `resources/dashboards/painel_observabilidade.lvdash.json` — dashboard final, versionado no repositório
+* **Uso**: `python scripts/gen_dashboard.py <target>` (targets: `dev`, `test`, `prod`)
+
 ## Deploy e Infraestrutura
 
-> **[SUPERSEDED em 19/09/2026 — orquestrador removido do job; ver seção Orquestração]**
-
-O pipeline é implantado via **Databricks Asset Bundles (DABs)**, definido em `databricks.yml` (raiz do projeto) e `resources/jobs/job_pipeline_cvm.yml`. O Job `Pipeline CVM - DFP` (id `661897477878521`), originalmente criado manualmente na UI, foi adotado pelo bundle via `databricks bundle deployment bind` — não foi recriado, preservando histórico de execuções.
+O pipeline é implantado via **Databricks Asset Bundles (DABs)**, definido em `databricks.yml` (raiz do projeto) e `resources/jobs/job_pipeline_semanal.yml`. O Job `CVM - Pipeline Completo Semanal` (id `890867014997453` em dev), originalmente criado manualmente na UI, foi adotado pelo bundle via `databricks bundle deployment bind` — não foi recriado, preservando histórico de execuções.
 
 **Características do deploy gerenciado por bundle:**
 * **`edit_mode: UI_LOCKED`**: o job não pode mais ser editado diretamente na interface do Databricks. Mudanças em tasks, schedule ou notificações exigem editar o YAML e rodar `databricks bundle deploy --target <dev|prod>`
@@ -896,7 +901,7 @@ Todos os nomes de catalogo, schema, tabela e volume sao derivados de `ambientes.
 * `AMBIENTE` (dev/test/prod): define catalogo e prefixo de schema
 * `CARGA` (incremental/completa): controla a janela de anos processada
 
-**DDL unificado**: O notebook `001_ddl_create_tables.py` cria todos os schemas e tabelas do projeto em uma unica passagem idempotente, incluindo `controle_ingestao`. Antes, essa tabela era criada apenas no `002_ddl_controle_ingestao.py`; sem ela, a primeira execucao do orquestrador em schema novo quebrava (`get_novos_anos_para_processar` faz SELECT na tabela). O 002 permanece como validacao idempotente.
+**DDL unificado**: O notebook `001_ddl_create_tables.py` cria todos os schemas e tabelas do projeto em uma unica passagem idempotente, incluindo `controle_ingestao`. Antes, essa tabela era criada apenas no `002_ddl_controle_ingestao.py` (notebook posteriormente excluído do workspace); sem ela, a primeira execucao do orquestrador em schema novo quebrava (`get_novos_anos_para_processar` faz SELECT na tabela).
 
 ## Sequência de Implementação até Gold
 

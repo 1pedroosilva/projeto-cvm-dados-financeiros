@@ -10,10 +10,10 @@
 | Job | Target | ID | Schedule | Pause | Notebooks Executados |
 |-----|--------|-----|----------|-------|---------------------|
 | **CVM - Verificação Diária Landing Zone** | dev | 348419458655416 | Diário 06:00 BRT | UNPAUSED | `05_apoio/004_verificacao_diaria_landing.py` |
-| **CVM - Pipeline Completo Semanal** | dev | 890867014997453 | Segunda 07:00 BRT | UNPAUSED | `01_bronze/101_cvm_dfp_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`02_silver/203_cvm_dfp_bpp.py` |
+| **CVM - Pipeline Completo Semanal** | dev | 890867014997453 | Segunda 07:00 BRT | UNPAUSED | `05_apoio/001_ddl_create_tables.py`<br>`01_bronze/101_cvm_dfp_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`02_silver/203_cvm_dfp_bpp.py` |
 | **[test] Testes de Integração - Pipeline CVM** | dev | 987359705402401 | Manual (GitHub Actions) | — | `05_apoio/001_ddl_create_tables.py`<br>`01_bronze/101_cvm_dfp_dre.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`06_testes/test_integracao_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`06_testes/test_integracao_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/203_cvm_dfp_bpp.py`<br>`06_testes/test_integracao_bpp.py` |
 | **CVM - Verificação Diária Landing Zone** | test | 770519249168919 | Diário 06:00 BRT | **PAUSED** | `05_apoio/004_verificacao_diaria_landing.py` |
-| **CVM - Pipeline Completo Semanal** | test | 684250943587739 | Segunda 07:00 BRT | **PAUSED** | `01_bronze/101_cvm_dfp_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`02_silver/203_cvm_dfp_bpp.py` |
+| **CVM - Pipeline Completo Semanal** | test | 684250943587739 | Segunda 07:00 BRT | **PAUSED** | `05_apoio/001_ddl_create_tables.py`<br>`01_bronze/101_cvm_dfp_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`02_silver/203_cvm_dfp_bpp.py` |
 | **[test] Testes de Integração - Pipeline CVM** | test | 474378723473259 | Manual (GitHub Actions) | — | `05_apoio/001_ddl_create_tables.py`<br>`01_bronze/101_cvm_dfp_dre.py`<br>`02_silver/201_cvm_dfp_dre.py`<br>`06_testes/test_integracao_dre.py`<br>`01_bronze/102_cvm_dfp_bpa.py`<br>`02_silver/202_cvm_dfp_bpa.py`<br>`06_testes/test_integracao_bpa.py`<br>`01_bronze/103_cvm_dfp_bpp.py`<br>`02_silver/203_cvm_dfp_bpp.py`<br>`06_testes/test_integracao_bpp.py` |
 
 ---
@@ -42,21 +42,9 @@
 
 | Camada | Notebook | Função |
 |--------|----------|--------|
-| Apoio | `002_ddl_controle_ingestao.py` | Validação idempotente da tabela `controle_ingestao` |
 | Apoio | `099_ddl_table_comments.py` | Adicionar COMMENT ON TABLE/COLUMN no catálogo UC |
 | Exploração | `EDA_002_analise_bpa_silver.py` | Análise exploratória BPA |
 | Exploração | `EDA_003_analise_bpp_silver.py` | Análise exploratória BPP |
-
----
-
-### 🔴 Aposentados (mantidos para uso manual específico)
-
-| Camada | Notebook | Ex-Função | Substituído Por |
-|--------|----------|-----------|----------------|
-| Apoio | `000_orquestrador_pipeline.py` | Detecção centralizada de anos a processar | Detecção distribuída via `inicializar_anos_processar()` em cada notebook |
-| Apoio | `003_download_cvm_para_landing.py` | Download direto sem comparação de Last-Modified | `004_verificacao_diaria_landing.py` (com HEAD + Last-Modified) |
-
-**Uso atual dos aposentados:** Download forçado de ano específico (003), validação manual de lógica legada (000).
 
 ---
 
@@ -76,6 +64,8 @@
 | `05_apoio/ambientes.json` | Mapeamento de ambientes (dev/test/prod) → prefixos de schema |
 | `databricks.yml` | Bundle: targets (dev/test/prod), jobs, variáveis |
 | `resources/jobs/*.yml` | Definições de jobs (verificacao_diaria, pipeline_semanal, testes_integracao) |
+| `scripts/gen_dashboard.py` | Gera o `.lvdash.json` do dashboard de observabilidade por ambiente (substitui `{{SCHEMA_PREFIX}}` pelo prefixo do target) |
+| `resources/dashboards/painel_observabilidade.lvdash.json.tpl` | Template versionado do dashboard Lakeview (4 páginas: Orquestração, Execução, Qualidade, Ingestão) |
 
 ---
 
