@@ -1,0 +1,37 @@
+# Configuracao do Dependabot - Projeto CVM Dados Financeiros
+# Monitora atualizacoes de dependencias para GitHub Actions e Python (pip).
+# Ecossistemas detectados a partir dos arquivos do projeto:
+#   - github-actions: workflows em .github/workflows/ usam actions versionadas
+#   - pip: projeto Python (ruff.toml, pytest, notebooks .py)
+# Frequencia: semanal (segunda-feira)
+# Diretorio: raiz do projeto ("/")
+
+version: 2
+
+updates:
+  # GitHub Actions - monitora as actions usadas nos workflows
+  # (actions/checkout, actions/setup-python, databricks/setup-cli, etc.)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # Python (pip) - monitora dependencias Python
+  # Detecta arquivos como requirements.txt, pyproject.toml, setup.py, etc.
+  # Nota: o projeto atualmente instala deps via pip install no CI.
+  # Quando um arquivo de manifesto for adicionado, o Dependabot criara PRs
+  # de atualizacao automaticamente.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"

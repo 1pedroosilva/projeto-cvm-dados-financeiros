@@ -1,0 +1,59 @@
+# GitHub Actions Workflow - CodeQL Code Scanning
+# Analise estatica de seguranca para o Projeto CVM Dados Financeiros.
+# Linguagem detectada a partir do codigo do projeto: Python
+#   - ruff.toml (linter Python)
+#   - pytest (testes Python)
+#   - Notebooks Databricks (.py)
+#   - CI instala Python 3.11 e pip
+#
+# Triggers:
+#   - push na branch main
+#   - pull requests na branch main
+#   - agendamento semanal (segunda-feira 01:30 UTC)
+
+name: "CodeQL"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Segunda-feira as 01:30 UTC
+    - cron: "30 1 * * 1"
+
+jobs:
+  analyze:
+    name: Analyze (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linguagem detectada no projeto
+        language: [python]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      # Autobuild tenta construir o projeto automaticamente.
+      # Para projetos Python sem build step explicito, isso e suficiente.
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
