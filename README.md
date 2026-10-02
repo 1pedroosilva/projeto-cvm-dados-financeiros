@@ -1,6 +1,7 @@
 
 [![CI](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/ci.yml/badge.svg)](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/ci.yml)
 [![Testes Databricks](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/testes_integracao.yml/badge.svg)](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/testes_integracao.yml)
+[![CodeQL](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/codeql.yml/badge.svg)](https://github.com/1pedroosilva/projeto-cvm-dados-financeiros/actions/workflows/codeql.yml)
 
 # Projeto CVM - Dados Financeiros
 
@@ -47,9 +48,12 @@ Os dados são extraídos do [Portal de Dados Abertos da CVM](https://dados.cvm.g
 
 ```
 projeto-cvm-dados-financeiros/
-├── .github/workflows/
-│   ├── ci.yml                   # Ruff + pytest (push/PR no main)
-│   └── testes_integracao.yml    # Deploy + run testes E2E (manual)
+├── .github/
+│   ├── dependabot.yml           # Atualizacoes de dependencias (semanal)
+│   └── workflows/
+│       ├── ci.yml               # Ruff + pytest (push/PR no main)
+│       ├── codeql.yml           # Code scanning Python (push/PR + semanal)
+│       └── testes_integracao.yml # Deploy + run testes E2E (manual)
 ├── 00_documentacao/
 │   ├── evolucao_projeto.md      # Histórico e decisões
 │   ├── tecnica/
@@ -205,6 +209,15 @@ O dashboard está versionado em `resources/dashboards/` e declarado no bundle vi
 * `dfp_cia_aberta_BPP_con_{ANO}.csv` - Balanço Patrimonial Passivo consolidado
 
 Detalhes sobre estrutura dos dados e conceitos de negócio em [`00_documentacao/negocio/dicionario_dados.md`](00_documentacao/negocio/dicionario_dados.md).
+
+## Segurança
+
+O repositório segue as quatro práticas de segurança recomendadas pelo GitHub:
+
+* **Branch protection** — branch `main` com regras de proteção configuradas
+* **Vulnerability reporting** — alertas de segurança do GitHub habilitados
+* **Dependabot** — `.github/dependabot.yml` monitora `github-actions` e `pip`, frequência semanal
+* **CodeQL** — `.github/workflows/codeql.yml` executa code scanning em Python a cada push, PR e semanalmente
 
 ## Documentação Complementar
 

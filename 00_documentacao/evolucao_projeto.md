@@ -17,6 +17,28 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 ---
 
+## 01/10/2026 - Segurança do Repositório (Dependabot + CodeQL)
+
+### Contexto
+O portfólio no GitHub não tinha automação de segurança. Três repositórios (projeto-cvm-dados-financeiros, databricks-genie-skills, genie-skills-eval) precisavam de detecção de vulnerabilidades em dependências e code scanning estático.
+
+### Decisões
+* **Dependabot com github-actions e pip** -> Monitora actions versionadas nos workflows e dependências Python quando manifestos existirem. Semanal às segundas
+* **CodeQL com github/codeql-action@v3** -> Action oficial do GitHub para análise estática. Linguagem detectada por repositório: Python (CVM e eval), auto-deteccao (skills, repo de markdown)
+* **Um commit por repositório** -> Escopos técnicos distintos, revert independente
+
+### Implementado
+* `.github/dependabot.yml` + `.github/workflows/codeql.yml` criados e commitados nos 3 repositórios
+* CVM: Dependabot monitora github-actions + pip; CodeQL analisa Python
+* Skills: Dependabot monitora github-actions; CodeQL sem campo `languages` (auto-deteccao)
+* Eval: Dependabot monitora github-actions; CodeQL analisa Python (19 arquivos .py)
+* README.md do CVM atualizado: badge CodeQL, árvore de diretórios, seção Segurança
+
+### Key Insight
+CodeQL não suporta o valor `languages: auto` na action init — quando o repositório não tem código em linguagem suportada, a omissão do campo `languages` é a forma correta de habilitar auto-deteccao.
+
+---
+
 ## 30/09/2026 - Versionamento do Dashboard de Observabilidade no Git (DAB + Multi-ambiente)
 
 ### Contexto
