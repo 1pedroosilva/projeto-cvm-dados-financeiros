@@ -21,10 +21,11 @@ Bronze usa estratégia **APPEND-ONLY**. Guardrails garantem que apenas dados vá
 
 | Guardrail | Condição | Ação se Falha | Razão |
 | --- | --- | --- | --- |
-| **Arquivo vazio** | `len(df_pandas) == 0` | PARA (Bronze preservada) | Evita DELETE de dados bons seguido de APPEND vazio |
+| **Arquivo vazio** | `len(df_pandas) == 0` | PARA (Bronze preservada) | Evita ingerir arquivo CSV sem dados |
 | **Schema inválido** | Colunas essenciais faltando | PARA (Bronze preservada) | Via `validar_e_projetar_schema()` - valida presença de colunas críticas definidas em `config_parametros.py` |
+| **Reconciliação de contagem** | `count_tabela != count_gravar` | PARA (Bronze preservada) | Verifica que contagem gravada na tabela Delta equivale à contagem do DataFrame gravado |
 
-> **⚠️ Status (23/09/2026)**: O guardrail "Arquivo vazio" está documentado mas **não implementado** nos notebooks Bronze. Planejado para o Grupo B. O guardrail "Schema inválido" está implementado via `validar_e_projetar_schema()`.
+> **Status (02/10/2026)**: Os três guardrails Bronze estão **implementados** nos notebooks 101 (DRE), 102 (BPA) e 103 (BPP). Verificação feita pela leitura integral do código de cada notebook.
 
 ### Fluxo de Erro
 
@@ -44,6 +45,10 @@ for ano in ANOS_PROCESSAR:
         
         # [3/4] APPEND (só executa se guardrails passaram)
         df_bronze.write.mode("append").saveAsTable("{SCHEMA_BRONZE}.101_dre_dfp")
+
+        # [4/4] GUARDRAIL: Reconciliação de contagem (pós-gravação)
+        # Lê tabela Delta, compara count_tabela vs count_gravar
+        # Se divergir: registrar_guardrail(FAIL) + raise ValueError → PARA
         
     except Exception as e:
         # Bronze NÃO modificada (APPEND não foi executado)
@@ -55,9 +60,9 @@ for ano in ANOS_PROCESSAR:
 
 ### Notebooks que Implementam
 
-* **101_cvm_dfp_dre** (célula 5) - DRE
-* **102_cvm_dfp_bpa** (célula 5) - BPA
-* **103_cvm_dfp_bpp** (célula 5) - BPP
+* **101_cvm_dfp_dre** (célula 6 - ORQUESTRAÇÃO RESILIENTE) - DRE
+* **102_cvm_dfp_bpa** (célula 6 - ORQUESTRAÇÃO RESILIENTE) - BPA
+* **103_cvm_dfp_bpp** (células 7-8 e 11 - EXTRAÇÃO, TRANSFORMAÇÃO e ORQUESTRAÇÃO) - BPP
 
 ### Função de Validação
 
@@ -105,6 +110,49 @@ def validar_e_projetar_schema(df: DataFrame, colunas_essenciais: List[str], cont
 ]
 ```
 
+### Implementação: Arquivo Vazio
+
+**Mecanismo**: Após ler o CSV do ZIP da Landing Zone para `df_pandas` (pandas), verifica `len(df_pandas) == 0`.
+
+**Comportamento em falha**:
+
+1. Chama `registrar_guardrail()` com `resultado='FAIL'`, `tipo_check='empty_file'`, registrando o nome do arquivo CSV vazio.
+2. Levanta `ValueError` com o nome do arquivo CSV.
+3. A exceção é capturada pelo `try/except` do loop de orquestração: o ano é adicionado a `anos_falha`, o erro é logado, e um registro `FAILED` é inserido em `controle_ingestao`.
+4. O processamento continua para o próximo ano (falha granular).
+
+**Uniformidade**: Implementado de forma idêntica nos três notebooks. A única variação é estrutural:
+
+* DRE e BPA: verificação inline na célula de orquestração.
+* BPP: verificação dentro da função `extrair_dados()`, que levanta a exceção para a célula de orquestração capturar.
+
+### Implementação: Reconciliação de Contagem
+
+**Mecanismo**: Quatro pontos de reconciliação rastreiam a contagem de registros em cada transição do pipeline:
+
+| Ponto | Transição | Variáveis | Ação em divergência |
+| --- | --- | --- | --- |
+| 1 | Extração → Spark | `count_extraido` vs `count_spark` | `assert` → PARA |
+| 2 | Pós-validação de schema | `count_spark` vs `count_validado` | `logger.warning` (não PARA — `validar_e_projetar_schema` projeta colunas, não filtra linhas) |
+| 3 | Pós-metadados técnicos | `count_validado` vs `count_gravar` | `assert` → PARA |
+| 4 | Pós-gravação na tabela Delta | `count_gravar` vs `count_tabela` | `registrar_guardrail()` + `raise ValueError` → PARA |
+
+O ponto 4 é o guardrail formal: após o `APPEND` na tabela Delta, lê a tabela filtrando por `ano` e `_versao_ingestao`, compara com a contagem do DataFrame gravado. Em caso de divergência, chama `registrar_guardrail()` com `resultado='FAIL'` (registrando `esperado`, `encontrado` e `registros_afetados`) e levanta `ValueError`.
+
+**Comportamento em falha** (ponto 4):
+
+1. Chama `registrar_guardrail()` com `resultado='FAIL'`, `tipo_check='row_count'`, `esperado`, `encontrado` e `registros_afetados`.
+2. Levanta `ValueError`.
+3. A exceção é capturada pelo `try/except` do loop de orquestração: o ano é adicionado a `anos_falha`, o erro é logado, e um registro `FAILED` é inserido em `controle_ingestao`.
+4. O processamento continua para o próximo ano (falha granular).
+
+**Uniformidade**: A lógica dos 4 pontos é idêntica nos três notebooks. A variação é estrutural e de nomenclatura:
+
+* DRE e BPA: os 4 pontos estão inline na célula de orquestração. A variável do ponto 3 chama-se `count_gravar`.
+* BPP: os pontos 1-3 estão na função `transformar_bronze()` (que retorna `df_bronze` e `count_registros`); o ponto 4 está na célula de orquestração. A variável do ponto 3 chama-se `count_registros`.
+
+Em todos os notebooks, o ponto 2 (pós-validação de schema) apenas emite `logger.warning` e não interrompe o processamento, pois `validar_e_projetar_schema()` seleciona colunas (não filtra linhas), então a contagem deve permanecer igual — o warning é uma rede de segurança.
+
 ---
 
 ## Silver - Guardrails de Transformação
@@ -118,6 +166,7 @@ Silver usa **REPLACE WHERE** (substituição atômica por período). Guardrail g
 | Guardrail | Condição | Ação se Falha | Razão |
 | --- | --- | --- | --- |
 | **Bronze vazia** | `count_bronze == 0` | SKIP (Silver preservada) | Evita DELETE de Silver quando Bronze não tem dados para o ano |
+| **Unicidade da chave de negócio** | Duplicatas após Window Function em `groupBy(chave).count() > 1` | PARA (Silver preservada) | Garante que cada combinação da chave aparece 1x após deduplicação |
 
 ### Fluxo
 
@@ -142,11 +191,37 @@ for ano in ANOS_PROCESSAR:
         .saveAsTable("{SCHEMA_SILVER}.201_dre_dfp")
 ```
 
+### Chave de Unicidade da Silver
+
+A chave de negócio da Silver é composta por **4 colunas**:
+
+```
+(CNPJ_CIA, DT_REFER, CD_CONTA, ORDEM_EXERC)
+```
+
+Esta chave é usada em três pontos, sempre alinhada:
+
+1. **Window Function** (filtro de versão): `PARTITION BY (CNPJ_CIA, DT_REFER, CD_CONTA, ORDEM_EXERC) ORDER BY _versao_ingestao DESC` -> `row_number() == 1`
+2. **Guardrail de unicidade**: `groupBy(chave).count().filter("count > 1")` -> se > 0, PARA
+3. **Teste de integração** (VALIDACAO 4): verifica `groupBy(chave).count()` na Silver finalizada
+
+#### Por que VERSAO e GRUPO_DFP não estão na chave
+
+**VERSAO** — A CVM publica demonstrações em versões. A Bronze preserva todas (APPEND-ONLY). A Silver seleciona apenas a **versão mais recente** via `ORDER BY _versao_ingestao DESC, row_number() == 1`. Incluir `VERSAO` na chave de unicidade significaria manter múltiplas versões do mesmo registro, contradizendo o propósito da Silver de ter um único registro por chave de negócio.
+
+**GRUPO_DFP** — Cada notebook Silver processa um tipo de demonstração específico a partir de uma tabela Bronze dedicada (DRE -> `101_dre_dfp`, BPA -> `102_bpa_dfp`, BPP -> `103_bpp_dfp`). A separação por `GRUPO_DFP` já é garantida pela divisão de tabelas; a coluna é preservada na Silver para rastreabilidade, mas não participa da deduplicação.
+
 ### Notebooks que Implementam
 
 * **201_cvm_dfp_dre** (célula 5) - DRE Silver
 * **202_cvm_dfp_bpa** (célula 5) - BPA Silver
 * **203_cvm_dfp_bpp** (célula 5) - BPP Silver
+
+### Testes que Validam
+
+* **test_integracao_dre** (VALIDACAO 4) - PKs únicas em 4 colunas
+* **test_integracao_bpa** (VALIDACAO 4) - PKs únicas em 4 colunas
+* **test_integracao_bpp** (VALIDACAO 4) - PKs únicas em 4 colunas
 
 ---
 

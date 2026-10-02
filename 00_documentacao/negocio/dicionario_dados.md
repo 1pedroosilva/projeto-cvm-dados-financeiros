@@ -104,6 +104,8 @@ Receita de Venda de Bens e/ou Serviços
 * `MOEDA`: Moeda dos valores (geralmente REAL)
 * `ESCALA_MOEDA`: Escala monetária (MIL = milhares de reais, UNIDADE = reais)
 
+> **Chave de unicidade da Silver**: A Silver deduplica por **4 colunas** — `(CNPJ_CIA, DT_REFER, CD_CONTA, ORDEM_EXERC)` — e não por todas as colunas listadas acima. `VERSAO` é colapsada pela Window Function (mantém apenas a versão mais recente); `GRUPO_DFP` é garantida pela separação de tabelas (uma tabela Bronze por tipo de demonstração). Detalhes técnicos em [`guardrails.md`](../tecnica/guardrails.md).
+
 ## Conceitos de Negócio
 
 ### Companhia Aberta
@@ -186,6 +188,22 @@ A camada Silver enriquece os dados com 4 colunas derivadas da estrutura hierárq
 
 * Uma empresa pode ter múltiplas versões do mesmo documento
 * **Regra**: Sempre usar a **última versão** (MAX(VERSAO) por empresa/período)
+* **Implementação Silver**: A Window Function `PARTITION BY (CNPJ_CIA, DT_REFER, CD_CONTA, ORDEM_EXERC) ORDER BY _versao_ingestao DESC` seleciona `row_number() == 1`. `VERSAO` não participa da chave de unicidade — é consumida pelo ordenamento. Ver [`guardrails.md`](../tecnica/guardrails.md).
+
+### Chave de Unicidade da Silver
+
+A chave de negócio da Silver é composta por **4 colunas**:
+
+```
+(CNPJ_CIA, DT_REFER, CD_CONTA, ORDEM_EXERC)
+```
+
+`VERSAO` e `GRUPO_DFP` — listadas acima como colunas principais da fonte CVM — **não participam da deduplicação** na Silver:
+
+* **VERSAO**: a Silver seleciona apenas a versão mais recente via Window Function (`ORDER BY _versao_ingestao DESC, row_number() == 1`). Incluir `VERSAO` na chave manteria múltiplas versões do mesmo registro.
+* **GRUPO_DFP**: cada notebook Silver processa um tipo de demonstração a partir de uma tabela Bronze dedicada (DRE -> `101_dre_dfp`, BPA -> `102_bpa_dfp`, BPP -> `103_bpp_dfp`). A separação por grupo é garantida pela divisão de tabelas.
+
+> **Detalhes técnicos**: ver [guardrails.md](../tecnica/guardrails.md) — seção "Chave de Unicidade da Silver".
 
 ### Comparação Temporal
 
