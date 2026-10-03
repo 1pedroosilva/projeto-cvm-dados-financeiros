@@ -225,6 +225,19 @@ Esta chave é usada em três pontos, sempre alinhada:
 
 ---
 
+## Valores do Campo `resultado`
+
+O campo `resultado` na tabela `observabilidade_guardrails` pode assumir os seguintes valores:
+
+| Valor | Descrição |
+| --- | --- |
+| `PASS` | Validação passou — dados conformes ao esperado |
+| `FAIL` | Validação falhou — processamento interrompido (raise) para preservar dados |
+| `WARN` | Validação emitiu alerta — processamento continua, mas com ressalva |
+| `SKIP` | Bronze do ano estava vazia; processamento pulado. Comportamento legítimo, não indica erro |
+
+---
+
 ## Princípios de Design
 
 ### 1. Fail-Safe

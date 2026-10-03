@@ -703,7 +703,7 @@ CREATE TABLE {SCHEMA_APOIO}.observabilidade_guardrails (
     ano                 INT,       -- Ano validado
     nome_guardrail      STRING,    -- Nome descritivo do guardrail
     tipo_check          STRING,    -- null_check, schema_check, row_count, uniqueness, range, reconciliation
-    resultado           STRING,    -- PASS, FAIL, WARN
+    resultado           STRING,    -- PASS, FAIL, WARN, SKIP
     esperado            STRING,    -- Valor esperado
     encontrado          STRING,    -- Valor encontrado
     registros_afetados  BIGINT,    -- Registros que falharam a validação
@@ -725,26 +725,26 @@ O pipeline implementa 5 guardrails que gravam resultados em `observabilidade_gua
 2. **Arquivo Vazio** (`tipo_check='empty_file'`)
    - Valida `len(df_pandas) > 0` após leitura do CSV
    - `resultado='FAIL'` → raise, protege Bronze de arquivo vazio
-   - A implementar
+   - Já implementado
 
 3. **Reconciliação de Contagem** (`tipo_check='row_count'`)
    - Compara `df_bronze.count()` antes do APPEND com `spark.table().count()` depois
    - `esperado` = count do DataFrame, `encontrado` = count na tabela
    - `resultado='FAIL'` se divergem → raise, detecta falha de gravação
-   - A implementar
+   - Já implementado
 
 **Silver (201/202/203)**:
 4. **Bronze Vazia** (`tipo_check='empty_table'`)
    - Valida que Bronze tem dados antes de processar Silver
-   - `resultado='FAIL'` → raise, protege Silver de processar vazio
+   - `resultado='SKIP'` → continue, Silver preservada (não marca SUCCESS)
    - Já implementado
 
 5. **Unicidade de Chave de Negócio** (`tipo_check='uniqueness'`)
-   - Valida unicidade de `(CNPJ_CIA, DT_REFER, VERSAO, CD_CONTA, GRUPO_DFP, ORDEM_EXERC)`
+   - Valida unicidade de `(CNPJ_CIA, DT_REFER, CD_CONTA, ORDEM_EXERC)`
    - Executado após filtro de versionamento (Window Function), antes do REPLACE WHERE
    - `registros_afetados` = count de duplicatas encontradas
    - `resultado='FAIL'` se duplicatas > 0 → raise, protege Silver de chave duplicada
-   - A implementar
+   - Já implementado
 
 **Características**:
 * Todos executados ANTES de modificar dados (pré-condição)
