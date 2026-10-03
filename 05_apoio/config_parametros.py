@@ -662,9 +662,25 @@ def registrar_guardrail(
         # Observabilidade nao deve quebrar o pipeline
         print(f"⚠️  Erro ao registrar guardrail: {e}")
 
-def get_url_arquivo_cvm(ano: int) -> str:
-    """Constrói URL completa do arquivo ZIP DFP da CVM (contém todas demonstrações)."""
-    return f"{CVM_BASE_URL}dfp_cia_aberta_{ano}.zip"
+def get_url_arquivo_cvm(ano: int, tipo: str = None) -> str:
+    """Constrói URL completa do arquivo ZIP DFP da CVM.
+
+    Args:
+        ano: Ano fiscal (ex: 2023).
+        tipo: Tipo de demonstração (ex: 'dre', 'bpa', 'bpp', 'dfc', 'dva',
+            'dmpl'). Se None, retorna URL do ZIP combinado (todas as
+            demonstrações). Se fornecido, retorna URL específica do tipo.
+
+    Returns:
+        URL completa do arquivo ZIP.
+
+    Raises:
+        KeyError: se tipo não estiver em TIPOS_DFP.
+    """
+    if tipo is None:
+        return f"{CVM_BASE_URL}dfp_cia_aberta_{ano}.zip"
+    tipo_upper = TIPOS_DFP[tipo]
+    return f"{CVM_BASE_URL}dfp_cia_aberta_{tipo_upper}_{ano}.zip"
 
 
 def get_anos_disponiveis_cvm() -> list:

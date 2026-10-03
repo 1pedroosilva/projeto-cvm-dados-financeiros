@@ -116,6 +116,98 @@ def test_normalizacao_preserva_o_valor_do_timestamp():
     assert dt_naive.tzinfo is None
     assert dt_aware.tzinfo == timezone.utc
 
+# ---------------------------------------------------------------------------
+# Testes de URL por tipo de demonstração (DRE, BPA, BPP, DFC, DVA, DMPL)
+# ---------------------------------------------------------------------------
+# A CVM disponibiliza um único ZIP por ano contendo todas as demonstrações.
+# get_url_arquivo_cvm(ano, tipo) constrói a URL incluindo o identificador
+# do tipo no nome do arquivo, permitindo referenciar cada demonstração.
+
+
+def test_url_dre_e_string_nao_vazia():
+    url = config.get_url_arquivo_cvm(2023, "dre")
+    assert isinstance(url, str) and url
+
+
+def test_url_dre_contem_identificador_do_tipo():
+    url = config.get_url_arquivo_cvm(2023, "dre")
+    assert "DRE" in url
+
+
+def test_url_dre_varia_entre_anos():
+    assert config.get_url_arquivo_cvm(2020, "dre") != config.get_url_arquivo_cvm(2021, "dre")
+
+
+def test_url_bpa_e_string_nao_vazia():
+    url = config.get_url_arquivo_cvm(2023, "bpa")
+    assert isinstance(url, str) and url
+
+
+def test_url_bpa_contem_identificador_do_tipo():
+    url = config.get_url_arquivo_cvm(2023, "bpa")
+    assert "BPA" in url
+
+
+def test_url_bpa_varia_entre_anos():
+    assert config.get_url_arquivo_cvm(2020, "bpa") != config.get_url_arquivo_cvm(2021, "bpa")
+
+
+def test_url_bpp_e_string_nao_vazia():
+    url = config.get_url_arquivo_cvm(2023, "bpp")
+    assert isinstance(url, str) and url
+
+
+def test_url_bpp_contem_identificador_do_tipo():
+    url = config.get_url_arquivo_cvm(2023, "bpp")
+    assert "BPP" in url
+
+
+def test_url_bpp_varia_entre_anos():
+    assert config.get_url_arquivo_cvm(2020, "bpp") != config.get_url_arquivo_cvm(2021, "bpp")
+
+
+def test_url_dfc_e_string_nao_vazia():
+    url = config.get_url_arquivo_cvm(2023, "dfc")
+    assert isinstance(url, str) and url
+
+
+def test_url_dfc_contem_identificador_do_tipo():
+    url = config.get_url_arquivo_cvm(2023, "dfc")
+    assert "DFC" in url
+
+
+def test_url_dfc_varia_entre_anos():
+    assert config.get_url_arquivo_cvm(2020, "dfc") != config.get_url_arquivo_cvm(2021, "dfc")
+
+
+def test_url_dva_e_string_nao_vazia():
+    url = config.get_url_arquivo_cvm(2023, "dva")
+    assert isinstance(url, str) and url
+
+
+def test_url_dva_contem_identificador_do_tipo():
+    url = config.get_url_arquivo_cvm(2023, "dva")
+    assert "DVA" in url
+
+
+def test_url_dva_varia_entre_anos():
+    assert config.get_url_arquivo_cvm(2020, "dva") != config.get_url_arquivo_cvm(2021, "dva")
+
+
+def test_url_dmpl_e_string_nao_vazia():
+    url = config.get_url_arquivo_cvm(2023, "dmpl")
+    assert isinstance(url, str) and url
+
+
+def test_url_dmpl_contem_identificador_do_tipo():
+    url = config.get_url_arquivo_cvm(2023, "dmpl")
+    assert "DMPL" in url
+
+
+def test_url_dmpl_varia_entre_anos():
+    assert config.get_url_arquivo_cvm(2020, "dmpl") != config.get_url_arquivo_cvm(2021, "dmpl")
+
+
 def test_config_carrega_sem_dbutils_e_sem_workspace():
     """O modulo precisa importar fora do Databricks, senao o CI morre na coleta.
 
