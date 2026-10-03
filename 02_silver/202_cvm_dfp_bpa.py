@@ -66,6 +66,11 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,Carregar transformações Silver
+# MAGIC %run ../05_apoio/transformacoes_silver
+
+# COMMAND ----------
+
 # DBTITLE 1,Inicializar Anos a Processar
 # Captura explícita do retorno com guardrail de lista vazia
 # CARGA=completa força todos os anos
@@ -184,13 +189,11 @@ for ano in ANOS_PROCESSAR:
             detalhes=f'Bronze com {count_bronze} registros para ano {ano}'
         )
 
-        window_spec = Window.partitionBy(
-            "CNPJ_CIA", "DT_REFER", "CD_CONTA", "ORDEM_EXERC"
-        ).orderBy(col("_versao_ingestao").desc())
-
-        df_versao_atual = df_bronze.withColumn(
-            "_row_num", row_number().over(window_spec)
-        ).filter(col("_row_num") == 1).drop("_row_num")
+        df_versao_atual = deduplicar_por_versao(
+            df_bronze,
+            colunas_particao=["CNPJ_CIA", "DT_REFER", "CD_CONTA", "ORDEM_EXERC"],
+            coluna_versao="_versao_ingestao"
+        )
 
         # GUARDRAIL: Unicidade da chave de negocio (alinhada com partitionBy da Window Function)
         chave_negocio = ["CNPJ_CIA", "DT_REFER", "CD_CONTA", "ORDEM_EXERC"]
@@ -238,26 +241,17 @@ for ano in ANOS_PROCESSAR:
                 col("CD_CONTA").isNotNull() &
                 col("VL_CONTA").isNotNull()
             ) \
-            .withColumn("VL_CONTA",
-                when(col("ESCALA_MOEDA") == "MIL", col("VL_CONTA") * 1000)
-                .otherwise(col("VL_CONTA"))
-            ) \
             .withColumn("ANO", year(col("DT_REFER"))) \
             .withColumn("TRIMESTRE", quarter(col("DT_REFER"))) \
             .withColumn("MES", month(col("DT_REFER"))) \
             .withColumn("DT_PROCESSAMENTO", current_timestamp()) \
-            .withColumn("ST_CONTA_FIXA", col("ST_CONTA_FIXA")) \
-            .withColumn("NIVEL_CONTA", size(split(col("CD_CONTA"), "[.]"))) \
-            .withColumn("CD_CONTA_PAI",
-                when(size(split(col("CD_CONTA"), "[.]")) > 1,
-                    regexp_extract(col("CD_CONTA"), r"^(.+)\.[^.]+$", 1)
-                ).otherwise(lit(None).cast("string"))
-            ) \
-            .withColumn("CD_CONTA_RAIZ", split(col("CD_CONTA"), "[.]")[0]) \
-            .withColumn("TIPO_CONTA",
-                when(size(split(col("CD_CONTA"), "[.]")) <= 2, lit("TOTALIZADORA"))
-                .otherwise(lit("ANALITICA"))
-            )
+            .withColumn("ST_CONTA_FIXA", col("ST_CONTA_FIXA"))
+
+        # Normalização de escala monetária (extraída para 05_apoio/transformacoes_silver)
+        df_transformado = normalizar_escala_monetaria(df_transformado)
+
+        # Enriquecimento hierárquico (extraído para 05_apoio/transformacoes_silver)
+        df_transformado = derivar_hierarquia_conta(df_transformado)
 
         # PROJEÇÃO EXPLÍCITA: Garante que DataFrame corresponde ao schema Silver
         df_silver = df_transformado.select(
