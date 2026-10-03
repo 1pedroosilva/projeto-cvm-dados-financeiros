@@ -1,0 +1,5 @@
+# Dependencias para testes locais e CI
+pytest>=8.0.0
+ruff>=0.8.0
+pyspark>=3.5.0
+pandas>=2.0.0
