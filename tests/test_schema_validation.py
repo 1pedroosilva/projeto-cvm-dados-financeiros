@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType
+from pyspark.sql.types import StringType, StructField, StructType
 
 # ---------------------------------------------------------------------------
 # Carregar config_parametros (notebook exportado como .py no Git folder)

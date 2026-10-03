@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
+from pyspark.sql.types import DoubleType, IntegerType, StringType, StructField, StructType
 
 # ---------------------------------------------------------------------------
 # Carregar transformacoes_silver (notebook exportado como .py no Git folder)
