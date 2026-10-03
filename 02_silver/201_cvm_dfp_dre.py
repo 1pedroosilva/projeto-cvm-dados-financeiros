@@ -59,7 +59,14 @@
 # COMMAND ----------
 
 # DBTITLE 1,Carregar transformações Silver
-# MAGIC %run ../05_apoio/transformacoes_silver
+import sys, os
+
+_ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+_nb_path = _ctx.notebookPath().get()
+_project_root = "/Workspace/" + "/".join(_nb_path.strip("/").split("/")[:-2])
+sys.path.insert(0, os.path.join(_project_root, "05_apoio"))
+
+from transformacoes_silver import normalizar_escala_monetaria, derivar_hierarquia_conta, deduplicar_por_versao
 
 # COMMAND ----------
 

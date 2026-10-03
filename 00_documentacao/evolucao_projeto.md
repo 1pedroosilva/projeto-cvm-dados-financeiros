@@ -17,6 +17,23 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 ---
 
+## 03/10/2026 - Correção: Import de transformacoes_silver em Jobs
+
+### Contexto
+Os notebooks silver (201_cvm_dfp_dre, 202_cvm_dfp_bpa, 203_cvm_dfp_bpp) falhavam em jobs com INVALID_RUN_CONFIGURATION. Usavam `%run ../05_apoio/transformacoes_silver`, mas `transformacoes_silver` existe como FILE (.py), não como NOTEBOOK. O comando `%run` do Databricks só resolve notebooks.
+
+### Decisões
+* **Import via `dbutils.notebook.entry_point.getDbutils().notebook().getContext()`, não `importlib` com `__file__`** -> `__file__` não está disponível em notebooks executados por jobs. O contexto Databricks nativo obtém o caminho do notebook e deriva o project root dinamicamente, funcionando tanto em execução interativa quanto em jobs
+
+### Implementado
+* Célula de import substituída nos 3 notebooks silver: obtém caminho via contexto Databricks, deriva project root removendo 2 segmentos (`/02_silver/notebook_name`), adiciona `05_apoio/` ao `sys.path`, importa as 3 funções diretamente
+* Comportamento idêntico mantido: notebooks continuam executando as mesmas transformações (normalizar_escala_monetaria, derivar_hierarquia_conta, deduplicar_por_versao)
+
+### Key Insight
+O método de import em notebooks Databricks depende do contexto de execução: `__file__` funciona em notebooks interativos mas não em jobs; `dbutils.notebook.entry_point.getDbutils().notebook().getContext()` é a única forma robusta de obter caminho em ambos os contextos.
+
+---
+
 ## 01/10/2026 - Segurança do Repositório (Dependabot + CodeQL)
 
 ### Contexto
