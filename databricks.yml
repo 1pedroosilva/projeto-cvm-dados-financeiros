@@ -60,6 +60,8 @@ targets:
   # Ambiente de testes de integracao
   test:
     mode: development
+    presets:
+      name_prefix: "[test ${workspace.current_user.short_name}] "
     variables:
       catalog: workspace
       schema_prefix: proj_cvm_test

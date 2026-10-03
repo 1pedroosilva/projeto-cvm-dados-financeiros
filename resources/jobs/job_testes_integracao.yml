@@ -6,7 +6,7 @@
 resources:
   jobs:
     testes_integracao_cvm:
-      name: "[test] Testes de Integração - Pipeline CVM"
+      name: "Testes de Integração - Pipeline CVM"
 
       # Configurações gerais do job
       max_concurrent_runs: 1
