@@ -11,7 +11,7 @@ Todas as dependencias Spark/Delta sao mockadas -- roda no CI sem Databricks.
 import importlib.util
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -136,7 +136,7 @@ def test_estado_fantasma(spark_mock, anos_fixos):
     sucesso mas nao tem dados fisicos na tabela bronze.
     Esperado: apenas 2023 (fantasma) aparece para reprocessamento.
     """
-    lm = datetime(2024, 1, 1, 0, 0, 0)
+    lm = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
     controle_df = pd.DataFrame({
         "ano": [2023, 2024],
@@ -166,8 +166,8 @@ def test_estado_republicado(spark_mock, anos_fixos):
     o controle (nao houve republicacao).
     Esperado: apenas 2023 (republicado) aparece para reprocessamento.
     """
-    lm_antigo = datetime(2024, 1, 1, 0, 0, 0)
-    lm_novo = datetime(2024, 6, 1, 12, 0, 0)
+    lm_antigo = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    lm_novo = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
 
     controle_df = pd.DataFrame({
         "ano": [2023, 2024],
