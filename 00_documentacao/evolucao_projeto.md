@@ -17,6 +17,26 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 ---
 
+## 03/10/2026 - Landing Zone Compartilhada entre Ambientes
+
+### Contexto
+O projeto tem tres ambientes (dev, test, prod). As schemas de escrita (bronze, silver, gold, apoio) sao isoladas por prefixo (`proj_cvm_dev_*`, `proj_cvm_test_*`, `proj_cvm_prod_*`), mas a landing zone (dado bruto da CVM em UC Volume) e unica e compartilhada. A questao surgiu ao provisionar o ambiente test: o compartilhamento fere o principio de separacao de ambientes?
+
+### Decisoes
+* **Landing zone compartilhada (`compartilhado_entre_ambientes: true`)** -> O dado bruto da CVM e imutavel e caro de re-baixar. Separar copias identicas de um dado publico seria custo de storage e tempo de download sem beneficio de isolamento
+* **Trade-off aceito: teste nao exercita o download** -> O teste de integracao valida transformacao (bronze → silver) mas nao o passo de ingestao da fonte. Risco contido: o volume e read-only para os pipelines e apenas um job (`verificacao_diaria` de dev, UNPAUSED) escreve nele; em test, o mesmo job esta PAUSED
+* **Caminho de mudanca declarado no config** -> `ambientes.json` prevê `compartilhado_entre_ambientes: false` com derivacao do schema do volume do prefixo do ambiente, se o requisito mudar
+
+### Implementado
+* `ambientes.json`: campo `volume.compartilhado_entre_ambientes: true` com `_nota_compartilhamento` explicando justificativa e trade-off
+* `ambientes.json`: `volume.schema` = `proj_cvm` (sem prefixo de ambiente), lido por `config_parametros` via `vol_config["schema"]`
+* Apenas o job `verificacao_diaria` (dev, UNPAUSED) escreve no volume; nos targets test e prod, o schedule esta PAUSED por override no `databricks.yml`
+
+### Key Insight
+Isolamento de ambientes protege a escrita, nao necessariamente a leitura de fonte imutavel. O dado bruto da CVM e publico e identico entre ambientes — separar copias adiciona custo sem aumentar seguranca ou confiabilidade. O principio de separacao aplica-se onde o ambiente altera o dado (schemas bronze/silver/gold/apoio), nao onde o dado e imutavel por natureza. A configuracao declarativa (`compartilhado_entre_ambientes: false`) permite reverter a decisao sem refactor se o requisito mudar.
+
+---
+
 ## 03/10/2026 - Correção: Import de transformacoes_silver em Jobs
 
 ### Contexto
