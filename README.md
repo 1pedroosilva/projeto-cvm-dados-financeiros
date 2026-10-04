@@ -49,47 +49,70 @@ Os dados são extraídos do [Portal de Dados Abertos da CVM](https://dados.cvm.g
 ```
 projeto-cvm-dados-financeiros/
 ├── .github/
-│   ├── dependabot.yml           # Atualizacoes de dependencias (semanal)
+│   ├── dependabot.yml                              # Atualizações de dependências (semanal)
 │   └── workflows/
-│       ├── ci.yml               # Ruff + pytest (push/PR no main)
-│       ├── codeql.yml           # Code scanning Python (push/PR + semanal)
-│       └── testes_integracao.yml # Deploy + run testes E2E (manual)
+│       ├── ci.yml                                  # Ruff + pytest (push/PR no main)
+│       ├── codeql.yml                              # Code scanning Python (push/PR + semanal)
+│       └── testes_integracao.yml                   # Deploy + run testes E2E (manual)
 ├── 00_documentacao/
-│   ├── evolucao_projeto.md      # Histórico e decisões
-│   ├── tecnica/
-│   │   ├── arquitetura.md            # Especificação técnica completa
-│   │   ├── estado_atual.md           # Retrato do pipeline hoje
-│   │   ├── guardrails.md             # Validações de qualidade
-│   │   └── refatoracao_observabilidade.md  # Design da refatoração da observabilidade
-│   └── negocio/
-│       └── dicionario_dados.md  # Conceitos de negócio CVM/DFP
-├── 01_bronze/                   # Ingestão bruta (3 notebooks)
-├── 02_silver/                   # Transformação (3 notebooks)
-├── 03_gold/                     # Agregação (planejada)
-│   └── README.md                # Descrição da camada planejada
-├── 04_exploracao/               # Análises exploratórias (3 notebooks EDA)
+│   ├── evolucao_projeto.md                         # Histórico e decisões
+│   ├── negocio/
+│   │   └── dicionario_dados.md                     # Conceitos de negócio CVM/DFP
+│   └── tecnica/
+│       ├── arquitetura.md                          # Especificação técnica completa
+│       ├── estado_atual.md                         # Retrato do pipeline hoje
+│       ├── guardrails.md                           # Validações de qualidade
+│       └── refatoracao_observabilidade.md          # Design da refatoração da observabilidade
+├── 01_bronze/
+│   ├── 101_cvm_dfp_dre.py                          # DRE consolidada → bronze
+│   ├── 102_cvm_dfp_bpa.py                          # BPA consolidado → bronze
+│   └── 103_cvm_dfp_bpp.py                          # BPP consolidado → bronze
+├── 02_silver/
+│   ├── 201_cvm_dfp_dre.py                          # Bronze DRE → silver (limpo, tipado)
+│   ├── 202_cvm_dfp_bpa.py                          # Bronze BPA → silver (limpo, tipado)
+│   └── 203_cvm_dfp_bpp.py                          # Bronze BPP → silver (limpo, tipado)
+├── 03_gold/
+│   └── README.md                                   # Descrição da camada planejada
+├── 04_exploracao/
+│   ├── EDA_001_analise_dre_silver.ipynb            # EDA DRE silver
+│   ├── EDA_002_analise_bpa_silver.py               # EDA BPA silver
+│   └── EDA_003_analise_bpp_silver.py               # EDA BPP silver
 ├── 05_apoio/
-│   ├── 000_orquestrador_pipeline.py
-│   ├── 001_ddl_create_tables.py
-│   ├── 002_ddl_controle_ingestao.py
-│   ├── 003_download_cvm_para_landing.py
-│   ├── 004_verificacao_diaria_landing.py
-│   ├── 099_ddl_table_comments.py
-│   ├── ambientes.json           # Resolução de ambiente e carga
-│   └── config_parametros.py
+│   ├── 001_ddl_create_tables.py                    # Criação de schemas e tabelas UC
+│   ├── 004_verificacao_diaria_landing.py           # Verificação da landing zone
+│   ├── 099_ddl_table_comments.py                   # Comentários UC nas tabelas
+│   ├── ambientes.json                              # Resolução de ambiente e carga
+│   ├── config_parametros.py                        # Configuração central do pipeline
+│   └── transformacoes_silver.py                    # Funções de transformação silver
 ├── 06_testes/
-│   ├── test_integracao_bpa.py   # Validação E2E BPA Bronze→Silver
-│   ├── test_integracao_bpp.py   # Validação E2E BPP Bronze→Silver
-│   └── test_integracao_dre.py   # Validação E2E DRE Bronze→Silver
-├── resources/jobs/
-│   ├── job_pipeline_semanal.yml      # Bronze→Silver semanal (6 tasks)
-│   ├── job_verificacao_diaria.yml    # Verificação diária landing zone
-│   └── job_testes_integracao.yml     # Testes E2E
+│   ├── test_integracao_bpa.py                      # Validação E2E BPA Bronze→Silver
+│   ├── test_integracao_bpp.py                      # Validação E2E BPP Bronze→Silver
+│   └── test_integracao_dre.py                      # Validação E2E DRE Bronze→Silver
+├── assets/
+│   └── painel_obs_cvm.gif                          # GIF do painel de observabilidade
+├── resources/
+│   ├── dashboards/
+│   │   ├── dashboard_observabilidade.yml           # Definição DAB do dashboard
+│   │   ├── painel_observabilidade.lvdash.json      # Dashboard Lakeview serializado
+│   │   └── painel_observabilidade.lvdash.json.tpl  # Template do dashboard
+│   └── jobs/
+│       ├── job_pipeline_semanal.yml                # Bronze→Silver semanal (6 tasks)
+│       ├── job_testes_integracao.yml               # Testes E2E
+│       └── job_verificacao_diaria.yml              # Verificação diária landing zone
+├── scripts/
+│   └── gen_dashboard.py                            # Gerador de dashboard por ambiente
 ├── tests/
-│   └── test_config_parametros.py
-├── databricks.yml               # Configuração DAB
-├── ruff.toml                    # Linter
-└── LICENSE                      # MIT
+│   ├── test_config_parametros.py                   # Testes unitários config_parametros
+│   ├── test_inicializar_anos.py                    # Testes unitários inicializar_anos
+│   ├── test_novos_anos.py                          # Testes unitários novos_anos
+│   ├── test_schema_validation.py                   # Testes unitários validação de schema
+│   └── test_transformacoes_silver.py               # Testes unitários transformações silver
+├── .gitignore                                      # Exclusões do Git
+├── databricks.yml                                  # Configuração DAB
+├── LICENSE                                         # MIT
+├── README.md                                       # Este arquivo
+├── requirements-test.txt                           # Dependências de teste
+└── ruff.toml                                       # Configuração do linter
 ```
 
 ## Stack Tecnológico
