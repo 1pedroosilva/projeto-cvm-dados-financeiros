@@ -68,7 +68,7 @@ system.lakeflow
 
 ## Tabelas finais
 
-Todas as tabelas existem em **Dev** (`proj_cvm_dev_05_apoio`) e **Test** (`proj_cvm_test_05_apoio`), exceto `dim_jobs` (uma única tabela compartilhada).
+Todas as tabelas existem em **Dev** (`proj_cvm_dev_05_apoio`) e **Test** (`proj_cvm_test_05_apoio`), em `{SCHEMA_APOIO}` por-ambiente.
 
 | tabela | origem | função |
 |---|---|---|
@@ -78,7 +78,7 @@ Todas as tabelas existem em **Dev** (`proj_cvm_dev_05_apoio`) e **Test** (`proj_
 | `observabilidade_execucoes_historico` | CTAS snapshot pré-29/09 | preservação de dados de desenvolvimento |
 | `observabilidade_guardrails` | notebooks — **intacta** | quality checks |
 | `controle_ingestao` | notebooks — **intacta** | controle landing zone |
-| `dim_jobs` | lookup manual (uma tabela, ambos ambientes) | `job_id → job_name + ambiente` |
+| `dim_jobs` | lookup manual (`{SCHEMA_APOIO}` por-ambiente) | `job_id → job_name + ambiente` |
 | ~~`observabilidade_jobs`~~ | **ELIMINADA** (Dev + Test) | substituída por `observabilidade_runs` |
 
 ---
@@ -239,7 +239,7 @@ Os 192 registros (Dev) + 17 (Test) com `run_id = NULL` são artefatos do períod
 
 ### Fase 0 — Preparação
 
-**Criar `dim_jobs`** (tabela compartilhada, schema `proj_cvm_05_apoio`):
+**Criar `dim_jobs`** (tabela por-ambiente, em `{SCHEMA_APOIO}`):
 - Colunas: `job_id BIGINT, job_name STRING, ambiente STRING, ativo BOOLEAN, atualizado_em TIMESTAMP`
 - Popular com `job_id` distintos do `system.lakeflow.job_run_timeline` pós-29/09 + `job_name` do Bundle YAML
 - Automação futura: MERGE detecta `job_id` novo no `system.lakeflow` e insere com `job_name = NULL, ativo = false`
