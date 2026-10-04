@@ -17,6 +17,28 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 ---
 
+## 03/10/2026 - Refatoração da Observabilidade: Transposição system.lakeflow → UC
+
+### Contexto
+A observabilidade do pipeline dependia de logging em notebook (`config_parametros` inserindo contexto do job em `observabilidade_execucoes` e `observabilidade_jobs` via `dbutils.widgets.get()`). `system.lakeflow` já contém runs e tasks do workspace com retenção duradoura, RBAC nativo e consulta por não-admin, mas não tem `job_name` e armazena IDs como STRING. A duplicação entre logging manual e system era redundante — 8 colunas de infra em `observabilidade_execucoes` eram recuperáveis via transposição.
+
+### Decisões
+* **Transposição via MERGE incremental diário, não query direta ao system.lakeflow** -> Query direta tem retenção purgada, exige admin, e IDs como STRING exigem CAST em toda consulta. MERGE para tabelas UC próprias resolve os três: retenção controlada, RBAC nativo, CAST uma vez no MERGE
+* **`observabilidade_execucoes` evolui no lugar via `ALTER TABLE`** -> As 8 colunas de infra migram para `observabilidade_runs`/`observabilidade_tasks`; a tabela preserva apenas métricas de negócio. Snapshot congelado antes da evolução preserva 209 registros pré-29/09
+* **`dim_jobs` como lookup manual (job_id → job_name + ambiente)** -> `system.lakeflow` não tem `job_name`. Enriquecimento via JOIN em tabela compartilhada, populada a partir do Bundle YAML
+* **Dashboard rewrite antes da evolução do schema** -> 5+ datasets leem colunas que migrarão. Evolução do schema só após dashboard parar de referenciá-las
+* **Aposentar `observabilidade_jobs`** -> Campos recuperáveis via `system.lakeflow.job_run_timeline`, que captura todos os runs do workspace (Dev + Test + manuais)
+
+### Implementado
+* Documento técnico `00_documentacao/tecnica/refatoracao_observabilidade.md` criado — design completo, plano de execução em 5 fases, schemas das novas tabelas, query padrão do dashboard
+* Plano: Fase 0 (`dim_jobs`) → Fase 1 (transposição + notebook 005) → Fase 2 (dashboard rewrite) → Fase 3 (snapshot + evolução + DRY) → Fase 4 (cleanup)
+* Documento revisado contra skills de technical-writing, artifact-documentation e docs-sync: removidas métricas sem teste, contagens que desincronizam, registro de processo, tom argumentativo e decisões de bastidor
+
+### Key Insight
+Logging manual em notebook e `system.lakeflow` são fontes redundantes para os mesmos dados de execução. O system já captura runs e tasks do workspace inteiro com metadados ricos (trigger_type, result_state, execution_duration) — mas em STRING e sem `job_name`. A transposição (MERGE diário com CAST + enriquecimento via `dim_jobs`) dá durabilidade e riqueza do system com tipagem e acessibilidade do UC. O logging manual deixa de ser fonte de verdade de infra e passa a registrar apenas métricas de negócio que o system não conhece.
+
+---
+
 ## 03/10/2026 - Landing Zone Compartilhada entre Ambientes
 
 ### Contexto
