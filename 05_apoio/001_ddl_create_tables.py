@@ -327,6 +327,64 @@ COMMENT 'Rastreia execuções de jobs (uma linha por run). MERGE idempotente via
 
 # COMMAND ----------
 
+# DBTITLE 1,APOIO - dim_jobs
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.dim_jobs (
+  job_id BIGINT COMMENT 'ID do job no Databricks',
+  job_name STRING COMMENT 'Nome do job (sem prefixo de deploy)',
+  ambiente STRING COMMENT 'Ambiente do job (dev, test, ci)',
+  ativo BOOLEAN COMMENT 'Indica se o job tem runs recentes',
+  atualizado_em TIMESTAMP COMMENT 'Timestamp da última atualização do registro'
+) USING DELTA
+COMMENT 'Lookup: job_id → (job_name, ambiente). Enriquece observabilidade_runs via JOIN. MERGE idempotente via job_id.'
+""")
+
+# COMMAND ----------
+
+# DBTITLE 1,APOIO - dim_jobs (população)
+spark.sql(f"""
+MERGE INTO {SCHEMA_APOIO}.dim_jobs AS t
+USING (
+  WITH jobs_latest AS (
+    SELECT
+      job_id,
+      name,
+      tags,
+      change_time
+    FROM system.lakeflow.jobs
+    WHERE workspace_id = '7474657818873516'
+      AND delete_time IS NULL
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY job_id ORDER BY change_time DESC) = 1
+  ),
+  runs_post_baseline AS (
+    SELECT DISTINCT CAST(job_id AS BIGINT) AS job_id
+    FROM system.lakeflow.job_run_timeline
+    WHERE period_start_time >= '2026-09-29'
+      AND workspace_id = '7474657818873516'
+  )
+  SELECT
+    r.job_id,
+    regexp_replace(j.name, '^\\[[^]]*\\] ', '') AS job_name,
+    j.tags['ambiente'] AS ambiente,
+    true AS ativo,
+    current_timestamp() AS atualizado_em
+  FROM runs_post_baseline r
+  INNER JOIN jobs_latest j ON CAST(j.job_id AS BIGINT) = r.job_id
+  WHERE j.tags['ambiente'] = '{AMBIENTE}'
+) AS s
+ON t.job_id = s.job_id
+WHEN MATCHED THEN UPDATE SET
+  job_name = s.job_name,
+  ambiente = s.ambiente,
+  ativo = s.ativo,
+  atualizado_em = s.atualizado_em
+WHEN NOT MATCHED THEN INSERT
+  (job_id, job_name, ambiente, ativo, atualizado_em)
+  VALUES (s.job_id, s.job_name, s.ambiente, s.ativo, s.atualizado_em)
+""")
+
+# COMMAND ----------
+
 # DBTITLE 1,CONFIRMAÇÃO FINAL
 print("✅ DDL concluído\n")
 
