@@ -58,9 +58,9 @@ projeto-cvm-dados-financeiros/
 │   ├── evolucao_projeto.md      # Histórico e decisões
 │   ├── tecnica/
 │   │   ├── arquitetura.md            # Especificação técnica completa
-│   │   ├── decisoes_arquiteturais.md # Decisões de design e trade-offs
 │   │   ├── estado_atual.md           # Retrato do pipeline hoje
-│   │   └── guardrails.md             # Validações de qualidade
+│   │   ├── guardrails.md             # Validações de qualidade
+│   │   └── refatoracao_observabilidade.md  # Design da refatoração da observabilidade
 │   └── negocio/
 │       └── dicionario_dados.md  # Conceitos de negócio CVM/DFP
 ├── 01_bronze/                   # Ingestão bruta (3 notebooks)
@@ -222,9 +222,9 @@ O repositório segue as quatro práticas de segurança recomendadas pelo GitHub:
 ## Documentação Complementar
 
 * **Arquitetura técnica**: [`00_documentacao/tecnica/arquitetura.md`](00_documentacao/tecnica/arquitetura.md)
-* **Decisões arquiteturais**: [`00_documentacao/tecnica/decisoes_arquiteturais.md`](00_documentacao/tecnica/decisoes_arquiteturais.md)
 * **Estado atual do projeto**: [`00_documentacao/tecnica/estado_atual.md`](00_documentacao/tecnica/estado_atual.md)
 * **Guardrails e validações**: [`00_documentacao/tecnica/guardrails.md`](00_documentacao/tecnica/guardrails.md)
+* **Refatoração da observabilidade**: [`00_documentacao/tecnica/refatoracao_observabilidade.md`](00_documentacao/tecnica/refatoracao_observabilidade.md) — design da refatoração (não implementado)
 * **Dicionário de dados e negócio**: [`00_documentacao/negocio/dicionario_dados.md`](00_documentacao/negocio/dicionario_dados.md)
 
 ## Licença
