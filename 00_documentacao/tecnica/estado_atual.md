@@ -93,6 +93,7 @@
 | Apoio | `observabilidade_jobs` | Rastreia runs de jobs (MERGE idempotente) |
 | Apoio | `observabilidade_execucoes` | Métricas de execução por task/ano |
 | Apoio | `observabilidade_guardrails` | Resultados de guardrails |
+| Apoio | `dim_jobs` | Lookup: job_id → (job_name, ambiente) |
 
 ### Volume
 

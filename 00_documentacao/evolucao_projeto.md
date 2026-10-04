@@ -1152,3 +1152,22 @@ Cada camada tem padrão de atualização diferente. Bronze append-only, Silver/G
 ### Key Insight
 Não existe "estratégia sempre melhor". DELETE+APPEND é mais simples que MERGE para batch periódico. MERGE é essencial para streaming/CDC. Escolha consciente por camada reflete entendimento dos tradeoffs de cada estratégia.
 
+---
+
+## 04/10/2026 - Refatoração da Observabilidade: Fase 0 (dim_jobs)
+
+### Contexto
+Implementação da Fase 0 da refatoração de observabilidade. O documento de design (`refatoracao_observabilidade.md`) propunha `dim_jobs` como "tabela compartilhada, schema `proj_cvm_05_apoio`" (sem prefixo de ambiente). Isso quebra a convenção de `ambientes.json` onde `prod` tem `prefixo: proj_cvm` sem sufixo, mas dev/test têm sufixo. `dim_jobs` deve seguir `{SCHEMA_APOIO}` por-ambiente, como todas as tabelas de apoio.
+
+### Decisão
+* **`dim_jobs` por-ambiente em `{SCHEMA_APOIO}`** -> Segue a convenção do projeto: todas as tabelas de apoio usam a variável `SCHEMA_APOIO` resolvida por `ambientes.json`. O DDL usa `CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.dim_jobs`, idempotente. Cada ambiente filtra `system.lakeflow.jobs` por `tags['ambiente'] = AMBIENTE`, populando apenas os jobs daquele ambiente.
+
+### Implementado
+* Correção do `refatoracao_observabilidade.md`: "schema `proj_cvm_05_apoio`" corrigido para `{SCHEMA_APOIO}` por-ambiente
+* DDL de `dim_jobs` adicionado ao notebook `001_ddl_create_tables.py` (5 colunas: `job_id`, `job_name`, `ambiente`, `ativo`, `atualizado_em`)
+* MERGE idempotente de populacao adicionado ao mesmo notebook: lê `system.lakeflow.job_run_timeline` pós-29/09, filtra por `tags['ambiente] = AMBIENTE`, limpa prefixo de deploy do `job_name` via `regexp_replace`
+* Documentacao atualizada: `README.md`, `arquitetura.md`, `estado_atual.md`, `evolucao_projeto.md`
+
+### Key Insight
+`system.lakeflow.jobs` tem coluna `tags` (map) com a chave `ambiente` preenchida para todos os jobs CVM ativos. Isso elimina a necessidade de manter um mapeamento manual `job_id -> ambiente` — o filtro `tags['ambiente'] = AMBIENTE` resolve naturalmente qual ambiente cada job pertence, sem infra adicional.
+

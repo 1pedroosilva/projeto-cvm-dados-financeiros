@@ -302,6 +302,7 @@ ANOS_PROCESSAR = inicializar_anos_processar()
 * `004_verificacao_diaria_landing.py` - Download incremental CVM (HEAD + Last-Modified)
 * `099_ddl_table_comments.py` - Documentação de metadados
 * `config_parametros.py` - Configuração centralizada
+* `dim_jobs` (tabela) - Lookup `job_id → (job_name, ambiente)`, populada via MERGE de `system.lakeflow.jobs` filtrado por ambiente. Enriquece `observabilidade_runs` via JOIN (Fase 1 da refatoração de observabilidade)
 
 ### Camada Bronze
 

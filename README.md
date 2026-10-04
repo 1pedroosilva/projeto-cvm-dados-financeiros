@@ -199,12 +199,13 @@ Detalhes em [`00_documentacao/tecnica/guardrails.md`](00_documentacao/tecnica/gu
 
 ## Observabilidade
 
-Quatro tabelas no schema de apoio registram o estado do pipeline em tempo de execução:
+Tabelas no schema de apoio registram o estado do pipeline em tempo de execução:
 
 * `controle_ingestao` — uma linha por ingestão de arquivo (fonte, ano, versão, `last_modified_cvm`, status)
 * `observabilidade_execucoes` — métricas por task: etapa, fonte, ano, duração, registros processados, contexto do job (`job_id`, `run_id`, `task_key`)
 * `observabilidade_jobs` — um registro por run, atualizado via MERGE idempotente a cada task; consolida início, fim e status do job completo
 * `observabilidade_guardrails` — resultados dos guardrails vinculados à execução pelo `id_execucao`
+* `dim_jobs` — lookup de `job_id` para `(job_name, ambiente)`, populada a partir de `system.lakeflow`
 
 O Painel de Observabilidade CVM, construído no Databricks, consulta essas tabelas. As abas implementadas são:
 
@@ -247,7 +248,7 @@ O repositório segue as quatro práticas de segurança recomendadas pelo GitHub:
 * **Arquitetura técnica**: [`00_documentacao/tecnica/arquitetura.md`](00_documentacao/tecnica/arquitetura.md)
 * **Estado atual do projeto**: [`00_documentacao/tecnica/estado_atual.md`](00_documentacao/tecnica/estado_atual.md)
 * **Guardrails e validações**: [`00_documentacao/tecnica/guardrails.md`](00_documentacao/tecnica/guardrails.md)
-* **Refatoração da observabilidade**: [`00_documentacao/tecnica/refatoracao_observabilidade.md`](00_documentacao/tecnica/refatoracao_observabilidade.md) — design da refatoração (não implementado)
+* **Refatoração da observabilidade**: [`00_documentacao/tecnica/refatoracao_observabilidade.md`](00_documentacao/tecnica/refatoracao_observabilidade.md) — design da refatoração da observabilidade (Fase 0 implementada)
 * **Dicionário de dados e negócio**: [`00_documentacao/negocio/dicionario_dados.md`](00_documentacao/negocio/dicionario_dados.md)
 
 ## Licença
