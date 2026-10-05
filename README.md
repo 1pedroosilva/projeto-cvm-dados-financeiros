@@ -205,7 +205,7 @@ Tabelas no schema de apoio registram o estado do pipeline em tempo de execução
 * `observabilidade_execucoes` — métricas por task: etapa, fonte, ano, duração, registros processados, contexto do job (`job_id`, `run_id`, `task_key`)
 * `observabilidade_jobs` — um registro por run, atualizado via MERGE idempotente a cada task; consolida início, fim e status do job completo
 * `observabilidade_guardrails` — resultados dos guardrails vinculados à execução pelo `id_execucao`
-* `dim_jobs` — lookup de `job_id` para `(job_name, ambiente)`, populada a partir de `system.lakeflow`
+* `jobs_metadata` — lookup de `job_id` para `(job_name, ambiente)`, populada a partir de `system.lakeflow`
 
 O Painel de Observabilidade CVM, construído no Databricks, consulta essas tabelas. As abas implementadas são:
 

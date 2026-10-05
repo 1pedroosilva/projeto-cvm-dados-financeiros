@@ -25,17 +25,17 @@ A observabilidade do pipeline dependia de logging em notebook (`config_parametro
 ### Decisões
 * **Transposição via MERGE incremental diário, não query direta ao system.lakeflow** -> Query direta tem retenção purgada, exige admin, e IDs como STRING exigem CAST em toda consulta. MERGE para tabelas UC próprias resolve os três: retenção controlada, RBAC nativo, CAST uma vez no MERGE
 * **`observabilidade_execucoes` evolui no lugar via `ALTER TABLE`** -> As 8 colunas de infra migram para `observabilidade_runs`/`observabilidade_tasks`; a tabela preserva apenas métricas de negócio. Snapshot congelado antes da evolução preserva 209 registros pré-29/09
-* **`dim_jobs` como lookup manual (job_id → job_name + ambiente)** -> `system.lakeflow` não tem `job_name`. Enriquecimento via JOIN em tabela compartilhada, populada a partir do Bundle YAML
+* **`jobs_metadata` como lookup manual (job_id → job_name + ambiente)** -> `system.lakeflow` não tem `job_name`. Enriquecimento via JOIN em tabela compartilhada, populada a partir do Bundle YAML
 * **Dashboard rewrite antes da evolução do schema** -> 5+ datasets leem colunas que migrarão. Evolução do schema só após dashboard parar de referenciá-las
 * **Aposentar `observabilidade_jobs`** -> Campos recuperáveis via `system.lakeflow.job_run_timeline`, que captura todos os runs do workspace (Dev + Test + manuais)
 
 ### Implementado
 * Documento técnico `00_documentacao/tecnica/refatoracao_observabilidade.md` criado — design completo, plano de execução em 5 fases, schemas das novas tabelas, query padrão do dashboard
-* Plano: Fase 0 (`dim_jobs`) → Fase 1 (transposição + notebook 005) → Fase 2 (dashboard rewrite) → Fase 3 (snapshot + evolução + DRY) → Fase 4 (cleanup)
+* Plano: Fase 0 (`jobs_metadata`) → Fase 1 (transposição + notebook 005) → Fase 2 (dashboard rewrite) → Fase 3 (snapshot + evolução + DRY) → Fase 4 (cleanup)
 * Documento revisado contra skills de technical-writing, artifact-documentation e docs-sync: removidas métricas sem teste, contagens que desincronizam, registro de processo, tom argumentativo e decisões de bastidor
 
 ### Key Insight
-Logging manual em notebook e `system.lakeflow` são fontes redundantes para os mesmos dados de execução. O system já captura runs e tasks do workspace inteiro com metadados ricos (trigger_type, result_state, execution_duration) — mas em STRING e sem `job_name`. A transposição (MERGE diário com CAST + enriquecimento via `dim_jobs`) dá durabilidade e riqueza do system com tipagem e acessibilidade do UC. O logging manual deixa de ser fonte de verdade de infra e passa a registrar apenas métricas de negócio que o system não conhece.
+Logging manual em notebook e `system.lakeflow` são fontes redundantes para os mesmos dados de execução. O system já captura runs e tasks do workspace inteiro com metadados ricos (trigger_type, result_state, execution_duration) — mas em STRING e sem `job_name`. A transposição (MERGE diário com CAST + enriquecimento via `jobs_metadata`) dá durabilidade e riqueza do system com tipagem e acessibilidade do UC. O logging manual deixa de ser fonte de verdade de infra e passa a registrar apenas métricas de negócio que o system não conhece.
 
 ---
 
@@ -1154,17 +1154,17 @@ Não existe "estratégia sempre melhor". DELETE+APPEND é mais simples que MERGE
 
 ---
 
-## 04/10/2026 - Refatoração da Observabilidade: Fase 0 (dim_jobs)
+## 04/10/2026 - Refatoração da Observabilidade: Fase 0 (jobs_metadata)
 
 ### Contexto
-Implementação da Fase 0 da refatoração de observabilidade. O documento de design (`refatoracao_observabilidade.md`) propunha `dim_jobs` como "tabela compartilhada, schema `proj_cvm_05_apoio`" (sem prefixo de ambiente). Isso quebra a convenção de `ambientes.json` onde `prod` tem `prefixo: proj_cvm` sem sufixo, mas dev/test têm sufixo. `dim_jobs` deve seguir `{SCHEMA_APOIO}` por-ambiente, como todas as tabelas de apoio.
+Implementação da Fase 0 da refatoração de observabilidade. O documento de design (`refatoracao_observabilidade.md`) propunha `jobs_metadata` como "tabela compartilhada, schema `proj_cvm_05_apoio`" (sem prefixo de ambiente). Isso quebra a convenção de `ambientes.json` onde `prod` tem `prefixo: proj_cvm` sem sufixo, mas dev/test têm sufixo. `jobs_metadata` deve seguir `{SCHEMA_APOIO}` por-ambiente, como todas as tabelas de apoio.
 
 ### Decisão
-* **`dim_jobs` por-ambiente em `{SCHEMA_APOIO}`** -> Segue a convenção do projeto: todas as tabelas de apoio usam a variável `SCHEMA_APOIO` resolvida por `ambientes.json`. O DDL usa `CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.dim_jobs`, idempotente. Cada ambiente filtra `system.lakeflow.jobs` por `tags['ambiente'] = AMBIENTE`, populando apenas os jobs daquele ambiente.
+* **`jobs_metadata` por-ambiente em `{SCHEMA_APOIO}`** -> Segue a convenção do projeto: todas as tabelas de apoio usam a variável `SCHEMA_APOIO` resolvida por `ambientes.json`. O DDL usa `CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.jobs_metadata`, idempotente. Cada ambiente filtra `system.lakeflow.jobs` por `tags['ambiente'] = AMBIENTE`, populando apenas os jobs daquele ambiente.
 
 ### Implementado
 * Correção do `refatoracao_observabilidade.md`: "schema `proj_cvm_05_apoio`" corrigido para `{SCHEMA_APOIO}` por-ambiente
-* DDL de `dim_jobs` adicionado ao notebook `001_ddl_create_tables.py` (5 colunas: `job_id`, `job_name`, `ambiente`, `ativo`, `atualizado_em`)
+* DDL de `jobs_metadata` adicionado ao notebook `001_ddl_create_tables.py` (5 colunas: `job_id`, `job_name`, `ambiente`, `ativo`, `atualizado_em`)
 * MERGE idempotente de populacao adicionado ao mesmo notebook: lê `system.lakeflow.job_run_timeline` pós-29/09, filtra por `tags['ambiente] = AMBIENTE`, limpa prefixo de deploy do `job_name` via `regexp_replace`
 * Documentacao atualizada: `README.md`, `arquitetura.md`, `estado_atual.md`, `evolucao_projeto.md`
 

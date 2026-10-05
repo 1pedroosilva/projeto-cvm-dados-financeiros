@@ -78,7 +78,7 @@ Todas as tabelas existem em **Dev** (`proj_cvm_dev_05_apoio`) e **Test** (`proj_
 | `observabilidade_execucoes_historico` | CTAS snapshot pré-29/09 | preservação de dados de desenvolvimento |
 | `observabilidade_guardrails` | notebooks — **intacta** | quality checks |
 | `controle_ingestao` | notebooks — **intacta** | controle landing zone |
-| `dim_jobs` | lookup manual (`{SCHEMA_APOIO}` por-ambiente) | `job_id → job_name + ambiente` |
+| `jobs_metadata` | lookup manual (`{SCHEMA_APOIO}` por-ambiente) | `job_id → job_name + ambiente` |
 | ~~`observabilidade_jobs`~~ | **ELIMINADA** (Dev + Test) | substituída por `observabilidade_runs` |
 
 ---
@@ -98,7 +98,7 @@ CREATE TABLE observabilidade_runs (
   period_end_time           TIMESTAMP,
   execution_duration_seconds BIGINT,
   run_duration_seconds      BIGINT,
-  job_name                  STRING,   -- enriquecido via dim_jobs (não existe em system.lakeflow)
+  job_name                  STRING,   -- enriquecido via jobs_metadata (não existe em system.lakeflow)
   ambiente                  STRING,   -- derivado de workspace_id
   ingested_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
 )
@@ -189,10 +189,10 @@ O dashboard atual tem 23 datasets, dos quais ~12 replicam a mesma CTE base (`bas
 
 - `run_id → job_id` é estritamente 1:1 em `system.lakeflow` (verificado: 0 run_ids com múltiplos job_ids, dados desde 29/09)
 - Desde 29/09, 100% das execuções têm `run_id` (verificado em 03/10/2026). Nenhuma execução manual de notebook após 29/09 (0 registros com `run_id` NULL pós-29/09).
-- `system.lakeflow` não tem `job_name` — `run_name` retorna NULL; enriquecimento necessário via `dim_jobs`
+- `system.lakeflow` não tem `job_name` — `run_name` retorna NULL; enriquecimento necessário via `jobs_metadata`
 - `system.lakeflow.job_task_run_timeline.run_id` = **task run ID** (diferente do job run ID); `job_run_id` = parent job run ID — chaves de JOIN devem usar `job_run_id`
 - `system.lakeflow` armazena `run_id` e `job_id` como STRING — CAST para BIGINT necessário no MERGE
-- `observabilidade_jobs` — todos os campos são recuperáveis via `system.lakeflow.job_run_timeline`. O `system.lakeflow` captura todos os runs do workspace (Dev + Test + manuais), enquanto `observabilidade_jobs` captura apenas os runs logados pelos notebooks. Enriquecimento (`job_name`, `ambiente`) migra para `dim_jobs` + `observabilidade_runs`
+- `observabilidade_jobs` — todos os campos são recuperáveis via `system.lakeflow.job_run_timeline`. O `system.lakeflow` captura todos os runs do workspace (Dev + Test + manuais), enquanto `observabilidade_jobs` captura apenas os runs logados pelos notebooks. Enriquecimento (`job_name`, `ambiente`) migra para `jobs_metadata` + `observabilidade_runs`
 
 ### Dados pré-29/09 (somente contexto, não influenciam o design)
 
@@ -211,7 +211,7 @@ O dashboard atual tem 23 datasets, dos quais ~12 replicam a mesma CTE base (`bas
 1. Lê watermark implícito: `SELECT MAX(period_start_time) FROM observabilidade_runs`
 2. MERGE incremental `system.lakeflow.job_run_timeline → observabilidade_runs` (com `CAST(run_id AS BIGINT)`, `CAST(job_id AS BIGINT)`)
 3. MERGE incremental `system.lakeflow.job_task_run_timeline → observabilidade_tasks` (com `CAST(run_id AS BIGINT)`, `CAST(job_run_id AS BIGINT)`)
-4. Enriquece `job_name` via JOIN em `dim_jobs`
+4. Enriquece `job_name` via JOIN em `jobs_metadata`
 
 **Watermark:** `MAX(period_start_time)` da própria tabela — zero infra adicional. MERGE é idempotente.
 
@@ -239,7 +239,7 @@ Os 192 registros (Dev) + 17 (Test) com `run_id = NULL` são artefatos do períod
 
 ### Fase 0 — Preparação
 
-**Criar `dim_jobs`** (tabela por-ambiente, em `{SCHEMA_APOIO}`):
+**Criar `jobs_metadata`** (tabela por-ambiente, em `{SCHEMA_APOIO}`):
 - Colunas: `job_id BIGINT, job_name STRING, ambiente STRING, ativo BOOLEAN, atualizado_em TIMESTAMP`
 - Popular com `job_id` distintos do `system.lakeflow.job_run_timeline` pós-29/09 + `job_name` do Bundle YAML
 - Automação futura: MERGE detecta `job_id` novo no `system.lakeflow` e insere com `job_name = NULL, ativo = false`
@@ -252,7 +252,7 @@ Os 192 registros (Dev) + 17 (Test) com `run_id = NULL` são artefatos do períod
 1. Watermark: `SELECT MAX(period_start_time) FROM observabilidade_runs`
 2. MERGE `system.lakeflow.job_run_timeline` → `observabilidade_runs` (CAST STRING → BIGINT)
 3. MERGE `system.lakeflow.job_task_run_timeline` → `observabilidade_tasks` (CAST STRING → BIGINT)
-4. Enriquecer `job_name` via JOIN em `dim_jobs`
+4. Enriquecer `job_name` via JOIN em `jobs_metadata`
 
 Idempotente. Self-healing (gap máximo = 1 dia).
 
@@ -303,10 +303,10 @@ Dev (192 registros) + Test (17 registros). 1 CTAS por ambiente.
 ### Dependências
 
 ```
-Fase 0 (dim_jobs) → Fase 1 (transposição) → Fase 2 (dashboard) → Fase 3 (snapshot + evolução + DRY) → Fase 4 (cleanup)
+Fase 0 (jobs_metadata) → Fase 1 (transposição) → Fase 2 (dashboard) → Fase 3 (snapshot + evolução + DRY) → Fase 4 (cleanup)
 ```
 
-- Fase 1 precisa de Fase 0 (MERGE enriquece via `dim_jobs`)
+- Fase 1 precisa de Fase 0 (MERGE enriquece via `jobs_metadata`)
 - Fase 2 precisa de Fase 1 (dashboard aponta para `runs`/`tasks` populadas)
 - Fase 3 precisa de Fase 2 (evolução do schema só depois que dashboard não referencia as colunas)
 - Fase 4 precisa de Fase 3 (aposentar `observabilidade_jobs` só após dashboard não a referenciar)
