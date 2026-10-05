@@ -327,9 +327,9 @@ COMMENT 'Rastreia execuções de jobs (uma linha por run). MERGE idempotente via
 
 # COMMAND ----------
 
-# DBTITLE 1,APOIO - dim_jobs
+# DBTITLE 1,APOIO - jobs_metadata
 spark.sql(f"""
-CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.dim_jobs (
+CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.jobs_metadata (
   job_id BIGINT COMMENT 'ID do job no Databricks',
   job_name STRING COMMENT 'Nome do job (sem prefixo de deploy)',
   ambiente STRING COMMENT 'Ambiente do job (dev, test, ci)',
@@ -341,9 +341,9 @@ COMMENT 'Lookup: job_id → (job_name, ambiente). Enriquece observabilidade_runs
 
 # COMMAND ----------
 
-# DBTITLE 1,APOIO - dim_jobs (população)
+# DBTITLE 1,APOIO - jobs_metadata (população)
 spark.sql(f"""
-MERGE INTO {SCHEMA_APOIO}.dim_jobs AS t
+MERGE INTO {SCHEMA_APOIO}.jobs_metadata AS t
 USING (
   WITH jobs_latest AS (
     SELECT
@@ -364,7 +364,7 @@ USING (
   )
   SELECT
     r.job_id,
-    regexp_replace(j.name, '^\\[[^]]*\\] ', '') AS job_name,
+    regexp_replace(j.name, '^\\[.*?\\] ', '') AS job_name,
     j.tags['ambiente'] AS ambiente,
     true AS ativo,
     current_timestamp() AS atualizado_em
