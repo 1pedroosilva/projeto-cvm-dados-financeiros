@@ -331,7 +331,7 @@ COMMENT 'Rastreia execuções de jobs (uma linha por run). MERGE idempotente via
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.jobs_metadata (
   job_id BIGINT COMMENT 'ID do job no Databricks',
-  job_name STRING COMMENT 'Nome do job (sem prefixo de deploy)',
+  job_name STRING COMMENT 'Nome do job (com prefixo de deploy do ambiente)',
   ambiente STRING COMMENT 'Ambiente do job (dev, test, ci)',
   ativo BOOLEAN COMMENT 'Indica se o job tem runs recentes',
   atualizado_em TIMESTAMP COMMENT 'Timestamp da última atualização do registro'
@@ -364,7 +364,7 @@ USING (
   )
   SELECT
     r.job_id,
-    regexp_replace(j.name, '^\\[.*?\\] ', '') AS job_name,
+    j.name AS job_name,
     j.tags['ambiente'] AS ambiente,
     true AS ativo,
     current_timestamp() AS atualizado_em

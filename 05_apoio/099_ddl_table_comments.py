@@ -273,7 +273,7 @@ Atualização: A cada run do job (célula no notebook 001_ddl_create_tables).'
 # Documentação das colunas
 for col, desc in [
     ('job_id', 'ID do job no Databricks (BIGINT, chave primária)'),
-    ('job_name', 'Nome do job sem prefixo de deploy (ex: "CVM - Pipeline Completo Semanal")'),
+    ('job_name', 'Nome do job com prefixo de deploy do ambiente (ex: "[dev 1pedro_osilva] CVM - Pipeline Completo Semanal")'),
     ('ambiente', 'Ambiente do job (dev, test, ci) extraído da tag'),
     ('ativo', 'Indica se o job tem runs recentes (pós-29/09/2026)'),
     ('atualizado_em', 'Timestamp da última atualização do registro via MERGE'),
