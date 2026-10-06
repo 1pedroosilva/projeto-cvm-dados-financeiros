@@ -237,14 +237,14 @@ Os 192 registros (Dev) + 17 (Test) com `run_id = NULL` são artefatos do períod
 
 ## Plano de execução
 
-### Fase 0 — Preparação
+### Fase 0 — Preparação (concluída 03/10/2026)
 
 **Criar `jobs_metadata`** (tabela por-ambiente, em `{SCHEMA_APOIO}`):
 - Colunas: `job_id BIGINT, job_name STRING, ambiente STRING, ativo BOOLEAN, atualizado_em TIMESTAMP`
 - Popular com `job_id` distintos do `system.lakeflow.job_run_timeline` pós-29/09 + `job_name` do Bundle YAML
 - Automação futura: MERGE detecta `job_id` novo no `system.lakeflow` e insere com `job_name = NULL, ativo = false`
 
-### Fase 1 — Transposição
+### Fase 1 — Transposição (concluída 06/10/2026)
 
 **1.1 Criar tabelas** `observabilidade_runs` e `observabilidade_tasks` (Dev + Test, schemas conforme acima)
 

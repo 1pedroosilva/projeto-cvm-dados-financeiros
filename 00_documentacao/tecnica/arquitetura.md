@@ -300,6 +300,7 @@ ANOS_PROCESSAR = inicializar_anos_processar()
 **Scripts de Apoio** (`05_apoio/`):
 * `001_ddl_create_tables.py` - Criação de schemas e tabelas Unity Catalog
 * `004_verificacao_diaria_landing.py` - Download incremental CVM (HEAD + Last-Modified)
+* `005_transposicao_system.ipynb` - Transposição diária de `system.lakeflow` para `observabilidade_runs`/`observabilidade_tasks` via MERGE incremental
 * `099_ddl_table_comments.py` - Documentação de metadados
 * `config_parametros.py` - Configuração centralizada
 * `jobs_metadata` (tabela) - Lookup `job_id → (job_name, ambiente)`, populada via MERGE de `system.lakeflow.jobs` filtrado por ambiente. Enriquece `observabilidade_runs` via JOIN (Fase 1 da refatoração de observabilidade)
@@ -622,16 +623,75 @@ df_resultado = spark.sql("""
 
 ### Arquitetura de Observabilidade (4 Camadas, 4 Tabelas)
 
-O pipeline implementa observabilidade estruturada em 4 camadas, cada uma com granularidade e responsabilidade distintas:
+O pipeline implementa observabilidade estruturada em 6 camadas, cada uma com granularidade e responsabilidade distintas:
 
 | Camada | Tabela | Granularidade | Escrita por |
 | --- | --- | --- | --- |
+| **Transposição (job-level)** | `observabilidade_runs` | 1 linha por run de job | `005_transposicao_system` via MERGE incremental de `system.lakeflow.job_run_timeline` |
+| **Transposição (task-level)** | `observabilidade_tasks` | 1 linha por task de job | `005_transposicao_system` via MERGE incremental de `system.lakeflow.job_task_run_timeline` |
 | **Orquestração** | `observabilidade_jobs` | 1 linha por run de job | Todos os notebooks via `registrar_observabilidade_job()` (MERGE) |
 | **Execução** | `observabilidade_execucoes` | 1 linha por task/notebook | Todos os notebooks via `registrar_observabilidade_execucao()` |
 | **Qualidade** | `observabilidade_guardrails` | 1 linha por execução de guardrail | Notebooks bronze/silver/gold nos pontos de validação |
 | **Ingestão** | `controle_ingestao` | 1 linha por arquivo verificado/ingerido | Bronze (101/102/103) + 004 (verificação diária) |
 
-#### Tabela 1: `observabilidade_jobs` (camada de orquestração)
+#### Tabela 1: `observabilidade_runs` (camada de transposição job-level)
+
+Espelho de `system.lakeflow.job_run_timeline` em UC, populado via MERGE incremental diário pelo notebook `005_transposicao_system`. Resolve três limitações do `system.lakeflow`: retenção controlada (não purgada em 365d), RBAC nativo UC, e CAST de STRING para BIGINT feito uma vez no MERGE.
+
+**Estrutura**:
+```sql
+CREATE TABLE {SCHEMA_APOIO}.observabilidade_runs (
+  run_id                    BIGINT,    -- CAST(system.run_id AS BIGINT)
+  job_id                    BIGINT,    -- CAST(system.job_id AS BIGINT)
+  workspace_id              STRING,
+  trigger_type              STRING,
+  result_state              STRING,
+  run_type                  STRING,
+  period_start_time         TIMESTAMP,
+  period_end_time           TIMESTAMP,
+  execution_duration_seconds BIGINT,
+  run_duration_seconds      BIGINT,
+  job_name                  STRING,    -- Enriquecido via JOIN em jobs_metadata
+  ambiente                  STRING     -- Enriquecido via JOIN em jobs_metadata
+);
+```
+
+**Características**:
+* **Watermark**: `MAX(period_start_time)` da própria tabela — zero infra adicional
+* **MERGE idempotente**: re-execução não duplica registros (dedup por `period_end_time`)
+* **Enriquecimento**: `job_name` e `ambiente` via JOIN em `jobs_metadata`
+* **Self-healing**: gap máximo de 1 dia (execução diária)
+
+#### Tabela 2: `observabilidade_tasks` (camada de transposição task-level)
+
+Espelho de `system.lakeflow.job_task_run_timeline` em UC, populado via MERGE incremental diário pelo notebook `005_transposicao_system`.
+
+**Estrutura**:
+```sql
+CREATE TABLE {SCHEMA_APOIO}.observabilidade_tasks (
+  run_id              BIGINT,    -- CAST(system.run_id AS BIGINT)
+  job_run_id          BIGINT,    -- CAST(system.job_run_id AS BIGINT)
+  job_id              BIGINT,    -- CAST(system.job_id AS BIGINT)
+  workspace_id        STRING,
+  task_key            STRING,
+  task_name           STRING,
+  result_state        STRING,
+  exception_type      STRING,
+  exception_message   STRING,
+  period_start_time   TIMESTAMP,
+  period_end_time     TIMESTAMP,
+  execution_duration_seconds BIGINT,
+  job_name            STRING,    -- Enriquecido via JOIN em jobs_metadata
+  ambiente            STRING     -- Enriquecido via JOIN em jobs_metadata
+);
+```
+
+**Características**:
+* **Watermark**: `MAX(period_start_time)` da própria tabela
+* **MERGE idempotente**: re-execução não duplica registros
+* **JOIN com `observabilidade_execucoes`**: por `run_id` + `task_key` (quando disponível)
+
+#### Tabela 3: `observabilidade_jobs` (camada de orquestração)
 
 Rastreia execuções de jobs (uma linha por run). Populated via MERGE idempotente — cada notebook atualiza o registro do run ao qual pertence.
 
@@ -657,7 +717,7 @@ CREATE TABLE {SCHEMA_APOIO}.observabilidade_jobs (
 * `status` monotônico: uma vez ERROR, sempre ERROR (sem race condition)
 * Contadores (`total_tasks`, `tasks_sucesso`) derivados via `COUNT(DISTINCT task_key)` de `observabilidade_execucoes` (não persistidos)
 
-#### Tabela 2: `observabilidade_execucoes` (camada de execução)
+#### Tabela 4: `observabilidade_execucoes` (camada de execução)
 
 Rastreia execuções de notebooks/tasks (uma linha por execução).
 
@@ -690,7 +750,7 @@ CREATE TABLE {SCHEMA_APOIO}.observabilidade_execucoes (
 * FK para `observabilidade_jobs` via chave composta `(job_id, run_id)` (colunas já presentes em ambas as tabelas)
 * Captura contexto de job via `dbutils.widgets.get()` (dynamic value references em `base_parameters` do job) com helper `_capturar_contexto_job()` — `os.getenv()` nao funciona em Serverless Compute
 
-#### Tabela 3: `observabilidade_guardrails` (camada de qualidade)
+#### Tabela 5: `observabilidade_guardrails` (camada de qualidade)
 
 Rastreia validações de qualidade de dados (uma linha por check executado).
 
@@ -753,7 +813,7 @@ O pipeline implementa 5 guardrails que gravam resultados em `observabilidade_gua
 * FK para `observabilidade_execucoes` via `id_execucao` (rastreabilidade completa)
 * Falha (`resultado='FAIL'`) → raise, interrompe processamento
 
-#### Tabela 4: `controle_ingestao` (camada de ingestão)
+#### Tabela 6: `controle_ingestao` (camada de ingestão)
 
 Rastreia arquivos verificados/ingeridos (uma linha por arquivo/ano).
 
@@ -864,7 +924,7 @@ Antes da implementação das 4 tabelas, a `observabilidade_execucoes` continha c
 * **Job Runs**: Histórico de execuções disponível no Databricks
 * **Delta History**: Auditoria de mudanças nas tabelas
 * **Logs**: Logs estruturados via `logging.basicConfig` (timestamp, nível, mensagem)
-* **System Tables**: `system.lakeflow.job_run_timeline` disponível mas não usado como pilar (observabilidade própria via instrumentação)
+* **System Tables**: `system.lakeflow.job_run_timeline` e `job_task_run_timeline` transpostos para `observabilidade_runs`/`observabilidade_tasks` via MERGE diário (notebook `005_transposicao_system`)
 
 ### Dashboard de Observabilidade
 

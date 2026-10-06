@@ -17,6 +17,30 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 ---
 
+## 06/10/2026 - Refatoração da Observabilidade: Fase 1 — Transposição system.lakeflow
+
+### Contexto
+A Fase 0 criou `jobs_metadata` (lookup `job_id → job_name + ambiente`). A Fase 1 implementa a transposição: espelhar `system.lakeflow.job_run_timeline` e `job_task_run_timeline` em tabelas UC próprias (`observabilidade_runs`, `observabilidade_tasks`) via MERGE incremental diário, enriquecendo com `job_name` via JOIN em `jobs_metadata`.
+
+### Decisões
+* **MERGE incremental com watermark implícito** em vez de query direta ao `system.lakeflow` -> Retenção controlada (não purgada em 365d), RBAC nativo UC, CAST de STRING para BIGINT feito uma vez no MERGE
+* **Notebook 005 como notebook Databricks (.ipynb), não .py** -> O notebook é executado via DABs como workspace notebook path, não como arquivo .py. O formato .ipynb é necessário para execução via Jobs
+* **Job `transposicao_system` agendado às 07:00 BRT** -> Garante que `verificacao_diaria` (06:00) já tenha dados disponíveis no system.lakeflow. Pipeline semanal (segundas 07:00) entra na transposição de terça (T+1 aceitável)
+* **UNPAUSED em Dev, PAUSED em Test** -> Test não tem jobs em execução agendada; a transposição em test seria vazia até que o ambiente seja ativado
+
+### Implementado
+* DDLs de `observabilidade_runs` (12 colunas) e `observabilidade_tasks` (13 colunas) adicionadas ao notebook `001_ddl_create_tables`
+* Notebook `005_transposicao_system` criado em `05_apoio/` com 5 células: documentação, config, MERGE runs, MERGE tasks, validação
+* MERGE incremental com watermark `MAX(period_start_time)` e enriquecimento via JOIN em `jobs_metadata`
+* Job DABs `transposicao_system` criado (`resources/jobs/job_transposicao_system.yml`), diário 07:00 BRT, 2 tasks: `ddl_create_tables` -> `transposicao_system`
+* `databricks.yml` atualizado com override `pause_status: PAUSED` para transposicao_system no target test
+* Validação em Dev: 49 runs, 226 tasks, 0 `job_name` NULL, idempotência comprovada (0 inserts na re-execução)
+
+### Key Insight
+O `system.lakeflow` tem delay de 15-30 min entre a execução do job e a disponibilidade dos dados. O agendamento às 07:00 BRT (1h após a verificação diária) garante que os dados do dia já estejam disponíveis. O MERGE com watermark implícito (`MAX(period_start_time)`) torna a transposição self-healing: um gap de 1 dia é recuperado na próxima execução sem intervenção manual.
+
+---
+
 ## 03/10/2026 - Refatoração da Observabilidade: Transposição system.lakeflow → UC
 
 ### Contexto

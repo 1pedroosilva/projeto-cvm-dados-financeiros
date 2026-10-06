@@ -80,6 +80,7 @@ projeto-cvm-dados-financeiros/
 ├── 05_apoio/
 │   ├── 001_ddl_create_tables.py                    # Criação de schemas e tabelas UC
 │   ├── 004_verificacao_diaria_landing.py           # Verificação da landing zone
+│   ├── 005_transposicao_system.ipynb               # Transposição system.lakeflow → UC
 │   ├── 099_ddl_table_comments.py                   # Comentários UC nas tabelas
 │   ├── ambientes.json                              # Resolução de ambiente e carga
 │   ├── config_parametros.py                        # Configuração central do pipeline
@@ -154,6 +155,7 @@ O job `pipeline_semanal` orquestra Bronze→Silver para DRE, BPA e BPP em três 
 
 * `pipeline_semanal` — Bronze→Silver, semanal às segundas 07:00 (América/São_Paulo). Ativo no target dev; pausado no target test
 * `verificacao_diaria` — Verificação da landing zone, diário às 06:00 (América/São_Paulo). Ativo no target dev; pausado no target test
+* `transposicao_system` — Transposição diária de `system.lakeflow` para tabelas UC (`observabilidade_runs`, `observabilidade_tasks`), às 07:00 (América/São_Paulo). Ativo no target dev; pausado no target test
 
 O target test existe para o job `testes_integracao_cvm` (executado sob demanda via GitHub Actions). Os jobs `pipeline_semanal` e `verificacao_diaria` são deployados no target test mas ficam pausados — não há execução automática agendada em test.
 
@@ -206,6 +208,8 @@ Tabelas no schema de apoio registram o estado do pipeline em tempo de execução
 * `observabilidade_jobs` — um registro por run, atualizado via MERGE idempotente a cada task; consolida início, fim e status do job completo
 * `observabilidade_guardrails` — resultados dos guardrails vinculados à execução pelo `id_execucao`
 * `jobs_metadata` — lookup de `job_id` para `(job_name, ambiente)`, populada a partir de `system.lakeflow`
+* `observabilidade_runs` — espelho de `system.lakeflow.job_run_timeline` (infra job-level), populada via MERGE diário pelo notebook `005_transposicao_system`
+* `observabilidade_tasks` — espelho de `system.lakeflow.job_task_run_timeline` (infra task-level), populada via MERGE diário pelo notebook `005_transposicao_system`
 
 O Painel de Observabilidade CVM, construído no Databricks, consulta essas tabelas. As abas implementadas são:
 
@@ -248,7 +252,7 @@ O repositório segue as quatro práticas de segurança recomendadas pelo GitHub:
 * **Arquitetura técnica**: [`00_documentacao/tecnica/arquitetura.md`](00_documentacao/tecnica/arquitetura.md)
 * **Estado atual do projeto**: [`00_documentacao/tecnica/estado_atual.md`](00_documentacao/tecnica/estado_atual.md)
 * **Guardrails e validações**: [`00_documentacao/tecnica/guardrails.md`](00_documentacao/tecnica/guardrails.md)
-* **Refatoração da observabilidade**: [`00_documentacao/tecnica/refatoracao_observabilidade.md`](00_documentacao/tecnica/refatoracao_observabilidade.md) — design da refatoração da observabilidade (Fase 0 implementada)
+* **Refatoração da observabilidade**: [`00_documentacao/tecnica/refatoracao_observabilidade.md`](00_documentacao/tecnica/refatoracao_observabilidade.md) — design da refatoração da observabilidade (Fases 0 e 1 implementadas)
 * **Dicionário de dados e negócio**: [`00_documentacao/negocio/dicionario_dados.md`](00_documentacao/negocio/dicionario_dados.md)
 
 ## Licença
