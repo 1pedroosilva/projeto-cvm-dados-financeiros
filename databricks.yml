@@ -79,3 +79,6 @@ targets:
         pipeline_semanal:
           schedule:
             pause_status: PAUSED
+        transposicao_system:
+          schedule:
+            pause_status: PAUSED

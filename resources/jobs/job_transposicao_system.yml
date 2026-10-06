@@ -1,0 +1,44 @@
+# Job CVM - Transposição system.lakeflow → observabilidade_runs/tasks
+# Execução diária 07:00 BRT. Espelha runs e tasks do system.lakeflow
+# para tabelas UC próprias com retenção controlada e RBAC.
+
+resources:
+  jobs:
+    transposicao_system:
+      name: "CVM - Transposição System Lakeflow"
+
+      max_concurrent_runs: 1
+
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+
+      schedule:
+        quartz_cron_expression: "0 0 7 * * ?"
+        timezone_id: "America/Sao_Paulo"
+        pause_status: UNPAUSED
+
+      tasks:
+        - task_key: ddl_create_tables
+          notebook_task:
+            notebook_path: /Users/1pedro.osilva@gmail.com/projeto-cvm-dados-financeiros/05_apoio/001_ddl_create_tables
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
+
+        - task_key: transposicao_system
+          depends_on:
+            - task_key: ddl_create_tables
+          notebook_task:
+            notebook_path: /Users/1pedro.osilva@gmail.com/projeto-cvm-dados-financeiros/05_apoio/005_transposicao_system
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+
+      tags:
+        projeto: cvm
+        frequencia: diaria
+        ambiente: ${bundle.target}

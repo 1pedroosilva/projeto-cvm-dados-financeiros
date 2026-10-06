@@ -341,6 +341,49 @@ COMMENT 'Lookup: job_id → (job_name, ambiente). Enriquece observabilidade_runs
 
 # COMMAND ----------
 
+# DBTITLE 1,APOIO - observabilidade_runs
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.observabilidade_runs (
+  run_id                      BIGINT    COMMENT 'CAST(system.run_id AS BIGINT)',
+  job_id                      BIGINT    COMMENT 'CAST(system.job_id AS BIGINT)',
+  workspace_id                STRING    COMMENT 'ID do workspace (comum a dev e test)',
+  trigger_type                STRING    COMMENT 'Tipo de trigger (CRON, ONETIME, etc.)',
+  result_state                STRING    COMMENT 'Estado final do run (SUCCEEDED, ERROR, etc.)',
+  run_type                    STRING    COMMENT 'Tipo do run (JOB_RUN, WORKFLOW_RUN, etc.)',
+  period_start_time           TIMESTAMP COMMENT 'Inicio do run (UTC)',
+  period_end_time             TIMESTAMP COMMENT 'Fim do run (UTC)',
+  execution_duration_seconds  BIGINT    COMMENT 'Duracao de execucao (0 no nivel job - usar tasks)',
+  run_duration_seconds        BIGINT    COMMENT 'Duracao total do run (0 no nivel job)',
+  job_name                    STRING    COMMENT 'Enriquecido via JOIN jobs_metadata (sem prefixo de deploy)',
+  ambiente                    STRING    COMMENT 'Ambiente do job (dev, test) - de jobs_metadata',
+  ingested_at                 TIMESTAMP COMMENT 'Timestamp de ingestao'
+) USING DELTA
+COMMENT 'Espelho de system.lakeflow.job_run_timeline. MERGE incremental diario via 005_transposicao_system.'
+""")
+
+# COMMAND ----------
+
+# DBTITLE 1,APOIO - observabilidade_tasks
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.observabilidade_tasks (
+  run_id                      BIGINT    COMMENT 'CAST(system.run_id AS BIGINT) = TASK run ID',
+  job_run_id                  BIGINT    COMMENT 'CAST(system.job_run_id AS BIGINT) = PARENT JOB run ID',
+  task_key                    STRING    COMMENT 'Chave da task no job',
+  workspace_id                STRING    COMMENT 'ID do workspace',
+  result_state                STRING    COMMENT 'Estado final da task',
+  period_start_time           TIMESTAMP COMMENT 'Inicio da task (UTC)',
+  period_end_time             TIMESTAMP COMMENT 'Fim da task (UTC)',
+  execution_duration_seconds  BIGINT    COMMENT 'Duracao de execucao da task (populado)',
+  setup_duration_seconds      BIGINT    COMMENT 'Duracao da fase de setup',
+  cleanup_duration_seconds    BIGINT    COMMENT 'Duracao da fase de cleanup',
+  termination_code            STRING    COMMENT 'Codigo de termino da task',
+  ingested_at                 TIMESTAMP COMMENT 'Timestamp de ingestao'
+) USING DELTA
+COMMENT 'Espelho de system.lakeflow.job_task_run_timeline. MERGE incremental diario via 005_transposicao_system.'
+""")
+
+# COMMAND ----------
+
 # DBTITLE 1,APOIO - jobs_metadata (população)
 spark.sql(f"""
 MERGE INTO {SCHEMA_APOIO}.jobs_metadata AS t
@@ -364,7 +407,7 @@ USING (
   )
   SELECT
     r.job_id,
-    j.name AS job_name,
+    regexp_replace(j.name, '^\\[.*?\\] ', '') AS job_name,
     j.tags['ambiente'] AS ambiente,
     true AS ativo,
     current_timestamp() AS atualizado_em
