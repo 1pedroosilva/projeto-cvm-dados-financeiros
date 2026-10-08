@@ -7,14 +7,13 @@
 
 Pipeline de ingestão e transformação de demonstrações financeiras de companhias abertas brasileiras, publicadas pela Comissão de Valores Mobiliários (CVM). Arquitetura medalhão implementada em Databricks com Delta Lake e Unity Catalog — Bronze e Silver em produção, Gold planejada.
 
-> **📋 [Estado Atual do Projeto](00_documentacao/tecnica/estado_atual.md)** — Retrato de hoje: jobs ativos, notebooks em produção, utilitários e aposentados (sem histórico).
+## Demonstrações Processadas
 
-## O que é este projeto
+O projeto processa demonstrações financeiras padronizadas (DFP) da CVM:
 
-Processa demonstrações financeiras padronizadas (DFP) da CVM:
-* **DRE** (Demonstração do Resultado do Exercício) - receitas, despesas e resultado
-* **BPA** (Balanço Patrimonial Ativo) - ativos
-* **BPP** (Balanço Patrimonial Passivo) - passivos e patrimônio líquido
+* **DRE** (Demonstração do Resultado do Exercício) — receitas, despesas e resultado
+* **BPA** (Balanço Patrimonial Ativo) — ativos
+* **BPP** (Balanço Patrimonial Passivo) — passivos e patrimônio líquido
 
 Os dados são extraídos do [Portal de Dados Abertos da CVM](https://dados.cvm.gov.br/), processados em camadas (bronze → silver) e armazenados em Unity Catalog para análise.
 
@@ -60,7 +59,7 @@ projeto-cvm-dados-financeiros/
 │   │   └── dicionario_dados.md                     # Conceitos de negócio CVM/DFP
 │   └── tecnica/
 │       ├── arquitetura.md                          # Especificação técnica completa
-│       ├── estado_atual.md                         # Retrato do pipeline hoje
+│       ├── estado_atual.md                         # Componentes do pipeline
 │       ├── guardrails.md                           # Validações de qualidade
 │       └── refatoracao_observabilidade.md          # Design da refatoração da observabilidade
 ├── 01_bronze/
@@ -94,11 +93,12 @@ projeto-cvm-dados-financeiros/
 ├── resources/
 │   ├── dashboards/
 │   │   ├── dashboard_observabilidade.yml           # Definição DAB do dashboard
-│   │   ├── painel_observabilidade.lvdash.json      # Dashboard Lakeview serializado
+│   │   ├── painel_observabilidade.lvdash.json      # Dashboard gerado por ambiente
 │   │   └── painel_observabilidade.lvdash.json.tpl  # Template do dashboard
 │   └── jobs/
-│       ├── job_pipeline_semanal.yml                # Bronze→Silver semanal (6 tasks)
+│       ├── job_pipeline_semanal.yml                # Bronze→Silver semanal (7 tasks)
 │       ├── job_testes_integracao.yml               # Testes E2E
+│       ├── job_transposicao_system.yml             # Transposição system.lakeflow → UC
 │       └── job_verificacao_diaria.yml              # Verificação diária landing zone
 ├── scripts/
 │   └── gen_dashboard.py                            # Gerador de dashboard por ambiente
@@ -121,12 +121,12 @@ projeto-cvm-dados-financeiros/
 * **Plataforma**: Databricks (Serverless Compute)
 * **Armazenamento**: Delta Lake + Unity Catalog
 * **Processamento**: Apache Spark (PySpark)
-* **Orquestração**: Databricks Workflows (Databricks Asset Bundles)
+* **Orquestração**: Lakeflow Jobs (Declarative Automation Bundles)
 * **Governança**: Unity Catalog (schemas, volumes, controle de ingestão)
 
 ## Configuração
 
-### Databricks Asset Bundle (DAB)
+### Declarative Automation Bundle (DAB)
 
 O projeto usa DAB para gerenciar infraestrutura como código. 3 ambientes declarados em `ambientes.json`:
 
@@ -147,9 +147,9 @@ Configuração em `databricks.yml` e `resources/jobs/*.yml`.
 
 ## Execução
 
-### Via Databricks Workflows (Recomendado)
+### Via Lakeflow Jobs (Recomendado)
 
-O job `pipeline_semanal` orquestra Bronze→Silver para DRE, BPA e BPP em três trilhos paralelos (6 tasks). Orquestração e download não são tasks deste job — o download é feito pelo job `verificacao_diaria`.
+O job `pipeline_semanal` orquestra Bronze→Silver para DRE, BPA e BPP em três trilhos paralelos (7 tasks). Orquestração e download não são tasks deste job — o download é feito pelo job `verificacao_diaria`.
 
 **Jobs**:
 
@@ -205,11 +205,12 @@ Tabelas no schema de apoio registram o estado do pipeline em tempo de execução
 
 * `controle_ingestao` — uma linha por ingestão de arquivo (fonte, ano, versão, `last_modified_cvm`, status)
 * `observabilidade_execucoes` — métricas por task: etapa, fonte, ano, duração, registros processados, contexto do job (`job_id`, `run_id`, `task_key`)
-* `observabilidade_jobs` — um registro por run, atualizado via MERGE idempotente a cada task; consolida início, fim e status do job completo
+* `observabilidade_jobs` — um registro por run
 * `observabilidade_guardrails` — resultados dos guardrails vinculados à execução pelo `id_execucao`
 * `jobs_metadata` — lookup de `job_id` para `(job_name, ambiente)`, populada a partir de `system.lakeflow`
 * `observabilidade_runs` — espelho de `system.lakeflow.job_run_timeline` (infra job-level), populada via MERGE diário pelo notebook `005_transposicao_system`
 * `observabilidade_tasks` — espelho de `system.lakeflow.job_task_run_timeline` (infra task-level), populada via MERGE diário pelo notebook `005_transposicao_system`
+* `base_unificada` — view SQL (JOIN `observabilidade_runs + observabilidade_execucoes` por `run_id`), query base reutilizável pelo dashboard
 
 O Painel de Observabilidade CVM, construído no Databricks, consulta essas tabelas. As abas implementadas são:
 
@@ -250,9 +251,9 @@ O repositório segue as quatro práticas de segurança recomendadas pelo GitHub:
 ## Documentação Complementar
 
 * **Arquitetura técnica**: [`00_documentacao/tecnica/arquitetura.md`](00_documentacao/tecnica/arquitetura.md)
-* **Estado atual do projeto**: [`00_documentacao/tecnica/estado_atual.md`](00_documentacao/tecnica/estado_atual.md)
+* **Componentes do pipeline**: [`00_documentacao/tecnica/estado_atual.md`](00_documentacao/tecnica/estado_atual.md)
 * **Guardrails e validações**: [`00_documentacao/tecnica/guardrails.md`](00_documentacao/tecnica/guardrails.md)
-* **Refatoração da observabilidade**: [`00_documentacao/tecnica/refatoracao_observabilidade.md`](00_documentacao/tecnica/refatoracao_observabilidade.md) — design da refatoração da observabilidade (Fases 0 e 1 implementadas)
+* **Refatoração da observabilidade**: [`00_documentacao/tecnica/refatoracao_observabilidade.md`](00_documentacao/tecnica/refatoracao_observabilidade.md) — design da refatoração da observabilidade (Fases 0 a 4)
 * **Dicionário de dados e negócio**: [`00_documentacao/negocio/dicionario_dados.md`](00_documentacao/negocio/dicionario_dados.md)
 
 ## Licença

@@ -629,10 +629,11 @@ O pipeline implementa observabilidade estruturada em 6 camadas, cada uma com gra
 | --- | --- | --- | --- |
 | **Transposição (job-level)** | `observabilidade_runs` | 1 linha por run de job | `005_transposicao_system` via MERGE incremental de `system.lakeflow.job_run_timeline` |
 | **Transposição (task-level)** | `observabilidade_tasks` | 1 linha por task de job | `005_transposicao_system` via MERGE incremental de `system.lakeflow.job_task_run_timeline` |
-| **Orquestração** | `observabilidade_jobs` | 1 linha por run de job | Todos os notebooks via `registrar_observabilidade_job()` (MERGE) |
+| **Orquestração** | `observabilidade_jobs` | 1 linha por run de job (legada — dashboard não a referencia desde a Fase 2) | Todos os notebooks via `registrar_observabilidade_job()` (MERGE) |
 | **Execução** | `observabilidade_execucoes` | 1 linha por task/notebook | Todos os notebooks via `registrar_observabilidade_execucao()` |
 | **Qualidade** | `observabilidade_guardrails` | 1 linha por execução de guardrail | Notebooks bronze/silver/gold nos pontos de validação |
 | **Ingestão** | `controle_ingestao` | 1 linha por arquivo verificado/ingerido | Bronze (101/102/103) + 004 (verificação diária) |
+| **View unificada** | `base_unificada` | 1 linha por execução com infra enriquecida | View SQL (LEFT JOIN `observabilidade_execucoes + observabilidade_runs` por `run_id`) |
 
 #### Tabela 1: `observabilidade_runs` (camada de transposição job-level)
 
@@ -691,7 +692,16 @@ CREATE TABLE {SCHEMA_APOIO}.observabilidade_tasks (
 * **MERGE idempotente**: re-execução não duplica registros
 * **JOIN com `observabilidade_execucoes`**: por `run_id` + `task_key` (quando disponível)
 
-#### Tabela 3: `observabilidade_jobs` (camada de orquestração)
+#### View: `base_unificada` (query base do dashboard)
+
+View SQL que faz LEFT JOIN `observabilidade_execucoes + observabilidade_runs` por `run_id`, expondo colunas de infra (`period_end_time`, `task_result_state`, `period_start_time`) ao lado de métricas de negócio (`registros_processados`, `duracao_segundos`, `etapa`, `fonte`, `ano`). Criada na Fase 2 da refatoração para eliminar a duplicação de CTEs de JOIN entre os datasets do dashboard.
+
+**Características**:
+* **Não materializada**: Avaliação pendente de performance (Otimização 3 do design)
+* **DDL**: Célula 17 do notebook `001_ddl_create_tables`
+* **Consumidores**: 6 datasets do dashboard (Categoria B da migração)
+
+#### Tabela 3: `observabilidade_jobs` (camada de orquestração — legada)
 
 Rastreia execuções de jobs (uma linha por run). Populated via MERGE idempotente — cada notebook atualiza o registro do run ao qual pertence.
 

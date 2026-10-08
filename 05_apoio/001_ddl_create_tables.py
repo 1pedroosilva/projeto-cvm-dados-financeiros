@@ -384,6 +384,40 @@ COMMENT 'Espelho de system.lakeflow.job_task_run_timeline. MERGE incremental dia
 
 # COMMAND ----------
 
+# DBTITLE 1,APOIO - base_unificada (view)
+spark.sql(f"""
+CREATE OR REPLACE VIEW {SCHEMA_APOIO}.base_unificada AS
+SELECT
+  r.run_id,
+  r.job_id,
+  r.job_name,
+  r.trigger_type,
+  r.result_state,
+  r.period_start_time,
+  r.period_end_time,
+  r.ambiente,
+  r.workspace_id,
+  DATEDIFF(SECOND, r.period_start_time, r.period_end_time) AS duracao_run_segundos,
+  t.task_key,
+  t.result_state AS task_result_state,
+  t.execution_duration_seconds AS task_duracao_segundos,
+  t.period_start_time AS task_period_start_time,
+  t.period_end_time AS task_period_end_time,
+  e.id_execucao,
+  e.etapa,
+  e.fonte,
+  e.ano,
+  e.registros_processados,
+  e.duracao_segundos,
+  e.created_at AS execucao_created_at
+FROM {SCHEMA_APOIO}.observabilidade_runs r
+  INNER JOIN {SCHEMA_APOIO}.observabilidade_tasks t ON r.run_id = t.job_run_id
+  LEFT JOIN {SCHEMA_APOIO}.observabilidade_execucoes e ON t.job_run_id = e.run_id
+    AND t.task_key = e.task_key
+""")
+
+# COMMAND ----------
+
 # DBTITLE 1,APOIO - jobs_metadata (população)
 spark.sql(f"""
 MERGE INTO {SCHEMA_APOIO}.jobs_metadata AS t

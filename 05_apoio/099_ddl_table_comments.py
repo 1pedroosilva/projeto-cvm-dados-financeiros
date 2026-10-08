@@ -254,6 +254,7 @@ for col, desc in [
 print("✅ Tabela silver 203_bpp_dfp documentada")
 
 # COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## APOIO - jobs_metadata
 
@@ -281,4 +282,3 @@ for col, desc in [
     spark.sql(f"""
     COMMENT ON COLUMN {SCHEMA_APOIO}.jobs_metadata.{col} IS '{desc}'
     """)
-

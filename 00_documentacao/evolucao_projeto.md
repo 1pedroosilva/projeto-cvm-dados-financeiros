@@ -17,6 +17,28 @@ Registro cronológico de decisões arquiteturais e aprendizados técnicos do pro
 
 ---
 
+## 07/10/2026 - Refatoração da Observabilidade: Fase 2 — Dashboard Rewrite
+
+### Contexto
+A Fase 1 transpôs `system.lakeflow` para `observabilidade_runs` e `observabilidade_tasks`. O dashboard ainda lia `observabilidade_jobs` (tabela aposentada no design) e fazia JOIN `observabilidade_execucoes + observabilidade_jobs` para combinar métricas de negócio com infraestrutura. A Fase 2 rewrita o dashboard para apontar para as novas tabelas, eliminando a dependência de `observabilidade_jobs`.
+
+### Decisões
+* **View `base_unificada` (JOIN `runs + execucoes`), não dataset compartilhado no dashboard** -> Dashboard Lakeview não tem dataset compartilhado reutilizável entre widgets. Uma view SQL no UC é a forma nativa de centralizar a lógica de JOIN. A view faz `LEFT JOIN observabilidade_runs ON execucoes.run_id = runs.run_id`, expondo colunas de infra (`period_end_time`, `task_result_state`) ao lado de métricas de negócio (`registros_processados`, `duracao_segundos`)
+* **Três categorias de migração (A/B/C), não abordagem uniforme** -> Categoria A (9 datasets que liam `observabilidade_jobs` → `observabilidade_runs`), Categoria B (6 datasets que faziam JOIN `execucoes + jobs` → `base_unificada`), Categoria C (5 datasets com ajustes pontuais de FK/coluna). Cada categoria tem um padrão de mudança distinto
+* **Mapeamento de colunas antigo → novo padronizado** -> `status='SUCCESS'` → `result_state='SUCCEEDED'`; `fim_ts` → `period_end_time`; `duracao_segundos` → `DATEDIFF(SECOND, period_start_time, period_end_time)`; `trigger_type='scheduled'/'periodic'` → `'cron'`; `trigger_type='one_time'` → `'onetime'`; `COALESCE(fim_ts, created_at)` → `COALESCE(period_end_time, ingested_at)`. Novos estados `CANCELLED` e `ERROR` adicionados
+* **Template `.tpl` sincronizado como passo obrigatório** -> O template `painel_observabilidade.lvdash.json.tpl` usa `{{SCHEMA_PREFIX}}` para multi-ambiente. Toda mudança no dashboard live deve ser espelhada no template, senão o deploy em prod/test quebra
+
+### Implementado
+* View `base_unificada` criada no schema de apoio (DDL adicionada como célula 17 do notebook `001_ddl_create_tables`). View faz LEFT JOIN `observabilidade_execucoes + observabilidade_runs` por `run_id`
+* Dashboard live migrado: 9 datasets Categoria A (`observabilidade_jobs` → `observabilidade_runs`), 6 datasets Categoria B (JOIN eliminado, consomem `base_unificada`), 5 datasets Categoria C (ajustes de FK e colunas). Dataset `obs_jobs` removido (31 → 30 datasets)
+* Template `.tpl` sincronizado: `obs_jobs` removido, 20 datasets atualizados, `{{SCHEMA_PREFIX}}` em todas as queries, zero referências a `observabilidade_jobs`
+* Validação: 30/30 datasets carregam sem erro no dashboard live. `base_unificada` retorna 404 linhas com 5 `task_result_state` distintos
+
+### Key Insight
+Dashboard Lakeview não tem conceito de dataset compartilhado entre widgets — cada widget tem sua própria query. Para eliminar a duplicação de lógica de JOIN, a alternativa nativa é uma view SQL no Unity Catalog. A view `base_unificada` centraliza o JOIN em um único ponto, e os 6 datasets da Categoria B consomem a view em vez de reimplementar o JOIN. A sincronização do template `.tpl` é facilmente esquecida: o dashboard live é editado pela UI, mas o template é a fonte para deploy em prod/test.
+
+---
+
 ## 06/10/2026 - Refatoração da Observabilidade: Fase 1 — Transposição system.lakeflow
 
 ### Contexto
@@ -1189,7 +1211,7 @@ Implementação da Fase 0 da refatoração de observabilidade. O documento de de
 ### Implementado
 * Correção do `refatoracao_observabilidade.md`: "schema `proj_cvm_05_apoio`" corrigido para `{SCHEMA_APOIO}` por-ambiente
 * DDL de `jobs_metadata` adicionado ao notebook `001_ddl_create_tables.py` (5 colunas: `job_id`, `job_name`, `ambiente`, `ativo`, `atualizado_em`)
-* MERGE idempotente de populacao adicionado ao mesmo notebook: lê `system.lakeflow.job_run_timeline` pós-29/09, filtra por `tags['ambiente] = AMBIENTE`, limpa prefixo de deploy do `job_name` via `regexp_replace`
+* MERGE idempotente de populacao adicionado ao mesmo notebook: lê `system.lakeflow.job_run_timeline` pós-29/09, filtra por `tags['ambiente] = AMBIENTE`
 * Documentacao atualizada: `README.md`, `arquitetura.md`, `estado_atual.md`, `evolucao_projeto.md`
 
 ### Key Insight

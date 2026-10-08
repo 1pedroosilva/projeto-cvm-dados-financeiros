@@ -175,9 +175,9 @@ Filtro por `workspace_id` dispensa `UNION ALL` entre ambientes.
 
 O dashboard atual tem 23 datasets, dos quais ~12 replicam a mesma CTE base (`base_jobs UNION ALL base_execs`). Mudou o JOIN? Corrige em 12 lugares.
 
-**Otimização 1 — Eliminar duplicação de CTEs:** Todos os datasets consomem a mesma query base (JOIN `runs + tasks + execucoes`), seja como dataset compartilhado no dashboard ou como view SQL. Elimina a duplicação de lógica de manutenção.
+**Otimização 1 — Eliminar duplicação de CTEs (implementada via view `base_unificada`):** A view SQL no UC centraliza o JOIN `observabilidade_runs + observabilidade_execucoes` em um único ponto. Os 6 datasets da Categoria B consomem a view em vez de reimplementar o JOIN. Dashboard Lakeview não suporta datasets compartilhados, então a view é a alternativa nativa.
 
-**Otimização 2 — Eliminar datasets redundantes:** Filtros (`filtro_ambiente`, `filtro_tipo_exec`, `filtro_runs`) leem da base compartilhada em vez de replicar queries. 23 datasets → ~20.
+**Otimização 2 — Eliminar datasets redundantes:** Dataset `obs_jobs` removido (31 → 30). Filtros continuam lendo de suas próprias queries.
 
 **Otimização 3 (condicional) — Materializar a base:** Se após as otimizações 1 e 2 o tempo de refresh ou o número de scans justificar, criar `base_unificada_materializada` que pré-computa o JOIN. Decisão pendente de medição — não materializar sem evidência de que o ganho justifica a camada física adicional.
 
@@ -262,20 +262,20 @@ Idempotente. Self-healing (gap máximo = 1 dia).
 
 **1.4 Validar**: `observabilidade_runs` e `observabilidade_tasks` populadas, `job_name` não-NULL, MERGE idempotente, watermark avança
 
-### Fase 2 — Dashboard rewrite (antes da evolução do schema)
+### Fase 2 — Dashboard rewrite (concluída 07/10/2026)
 
 > 5+ datasets leem colunas de `observabilidade_execucoes` que migrarão para `observabilidade_runs`/`tasks` (`status`, `duracao_segundos`). A evolução do schema só ocorre após o dashboard parar de referenciar essas colunas.
 
-**2.1 Criar dataset compartilhado** `base_unificada` (JOIN `runs + tasks + execucoes`) — query base reutilizável no dashboard, sem materialização física. A materialização é avaliada na Otimização 3 após medição.
+**2.1 Criar view `base_unificada`** (LEFT JOIN `observabilidade_execucoes + observabilidade_runs` por `run_id`) — view SQL no UC, query base reutilizável pelo dashboard. DDL no notebook `001_ddl_create_tables`, célula 17. Materialização pendente de medição (Otimização 3).
 
-**2.2 Migrar 23 datasets:**
-- **Categoria A** (8 datasets, lê `observabilidade_jobs` → lê `observabilidade_runs`): Status Hero, Histórico Duração, Últimas Execuções, Duração Média, Taxa Sucesso, Filtros (Ambiente, Tipo Exec, Runs)
-- **Categoria B** (4 datasets, lê `execucoes JOIN jobs` → lê `base_unificada`): Breakdown Tempo, Heatmap Throughput, KPIs Execução, Scatter
-- **Categoria C** (11 datasets, ajustar FK): guardrails (5 — `status` vem de `tasks.result_state`), `controle_ingestao` (3 — intactos), filtros `execucoes` (2), Cobertura (1 — `status` de `tasks`)
+**2.2 Migrar 30 datasets em 3 categorias:**
+- **Categoria A** (9 datasets, lê `observabilidade_jobs` → lê `observabilidade_runs`): Status Hero, Histórico Duração, Últimas Execuções, Duração Média, Taxa Sucesso, Filtros (Ambiente, Tipo Exec, Runs), orq_execucoes_48h
+- **Categoria B** (6 datasets, lê `execucoes JOIN jobs` → lê `base_unificada`): Breakdown Tempo, Heatmap Throughput, KPIs Execução, Scatter, exe_cobertura, obs_execucoes
+- **Categoria C** (5 datasets, ajustes de FK/coluna): guardrails (2 — `status` via `observabilidade_runs`), `controle_ingestao` (1 — intacto), Cobertura (1 — `status` de `runs`), qual_checks (1)
 
-**2.3 Eliminar datasets redundantes** (filtros leem de `base_unificada`): 23 → ~20
+**2.3 Remover dataset `obs_jobs`** (não referenciado): 31 → 30 datasets. Filtros continuam lendo de suas próprias queries.
 
-**2.4 Validar**: dashboard carrega sem erro, nenhum dataset referencia `observabilidade_jobs`, widgets renderizam
+**2.4 Validar**: 30/30 datasets loaded sem erro, zero referências a `observabilidade_jobs`, view `base_unificada` retorna 404 linhas com 5 `task_result_state` distintos
 
 ### Fase 3 — Snapshot + evolução do schema + DRY
 

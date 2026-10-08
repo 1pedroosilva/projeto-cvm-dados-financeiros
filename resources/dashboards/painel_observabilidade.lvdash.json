@@ -1,27 +1,6 @@
 {
   "datasets": [
     {
-      "name": "obs_jobs",
-      "displayName": "Observabilidade Jobs",
-      "queryLines": [
-        "SELECT\n",
-        "  job_id,\n",
-        "  job_name,\n",
-        "  run_id,\n",
-        "  trigger_type,\n",
-        "  inicio_ts,\n",
-        "  fim_ts,\n",
-        "  duracao_segundos,\n",
-        "  ROUND(duracao_segundos / 60.0, 1) AS duracao_minutos,\n",
-        "  status,\n",
-        "  created_at\n",
-        "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_jobs\n",
-        "ORDER BY\n",
-        "  COALESCE(inicio_ts, created_at) DESC"
-      ]
-    },
-    {
       "name": "obs_guardrails",
       "displayName": "Observabilidade Guardrails",
       "queryLines": [
@@ -50,12 +29,11 @@
       "displayName": "Observabilidade Execuções",
       "queryLines": [
         "SELECT\n",
-        "*\n",
+        "  *\n",
         "FROM\n",
         "  workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes\n",
         "ORDER BY\n",
-        "  inicio_ts DESC\n",
-        "--LIMIT 100"
+        "  created_at DESC"
       ]
     },
     {
@@ -84,21 +62,30 @@
       "queryLines": [
         "SELECT\n",
         "  job_name AS Pipeline,\n",
-        "  DATE_FORMAT(fim_ts, 'dd/MM/yyyy HH:mm') AS `Concluído em`,\n",
-        "  CASE \n",
-        "    WHEN duracao_segundos >= 60 THEN CONCAT(FLOOR(duracao_segundos / 60), 'min ', ROUND(duracao_segundos % 60), 's')\n",
-        "    ELSE CONCAT(ROUND(duracao_segundos), ' seg')\n",
+        "  DATE_FORMAT(period_end_time, 'dd/MM/yyyy HH:mm') AS `Concluído em`,\n",
+        "  CASE\n",
+        "    WHEN\n",
+        "      DATEDIFF(SECOND, period_start_time, period_end_time) >= 60\n",
+        "    THEN\n",
+        "      CONCAT(\n",
+        "        FLOOR(DATEDIFF(SECOND, period_start_time, period_end_time) / 60),\n",
+        "        'min ',\n",
+        "        ROUND(DATEDIFF(SECOND, period_start_time, period_end_time) % 60),\n",
+        "        's'\n",
+        "      )\n",
+        "    ELSE CONCAT(ROUND(DATEDIFF(SECOND, period_start_time, period_end_time)), ' seg')\n",
         "  END AS `Tempo de Execução`,\n",
         "  CASE\n",
-        "    WHEN status = 'SUCCESS' THEN '✅ Sucesso'\n",
-        "    WHEN status = 'RUNNING' THEN '🔄 Executando'\n",
-        "    WHEN status = 'FAILED' THEN '❌ Falhou'\n",
-        "    ELSE status\n",
+        "    WHEN result_state = 'SUCCEEDED' THEN '✅ Sucesso'\n",
+        "    WHEN result_state = 'FAILED' THEN '❌ Falhou'\n",
+        "    WHEN result_state = 'CANCELLED' THEN '⚠️ Cancelado'\n",
+        "    WHEN result_state = 'ERROR' THEN '❌ Erro'\n",
+        "    ELSE result_state\n",
         "  END AS Resultado\n",
         "FROM\n",
-        "  observabilidade_jobs\n",
+        "  workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
         "ORDER BY\n",
-        "  COALESCE(fim_ts, created_at) DESC\n",
+        "  COALESCE(period_end_time, ingested_at) DESC\n",
         "LIMIT 1"
       ],
       "catalog": "workspace",
@@ -109,12 +96,31 @@
       "displayName": "Duração Média Pipeline (7 dias)",
       "queryLines": [
         "SELECT\n",
-        "  ROUND(AVG(duracao_segundos) / 60.0, 1) AS duracao_minutos\n",
+        "  ROUND(AVG(DATEDIFF(SECOND, period_start_time, period_end_time)) / 60.0, 1) AS duracao_minutos\n",
         "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_jobs\n",
+        "  workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
         "WHERE\n",
-        "  COALESCE(fim_ts, created_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
-        "  AND duracao_segundos IS NOT NULL"
+        "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  AND period_start_time IS NOT NULL\n",
+        "  AND period_end_time IS NOT NULL\n",
+        "  AND (:ambiente IS NULL OR array_contains(:ambiente, INITCAP(ambiente)))\n",
+        "  AND (:tipo_execucao IS NULL OR array_contains(:tipo_execucao, CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automático' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END))"
+      ],
+      "parameters": [
+        {
+          "displayName": "Ambiente",
+          "keyword": "ambiente",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {}
+        },
+        {
+          "displayName": "Tipo de Execução",
+          "keyword": "tipo_execucao",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {}
+        }
       ],
       "catalog": "workspace",
       "schema": "proj_cvm_dev_05_apoio"
@@ -127,7 +133,7 @@
         "  ROUND(\n",
         "    SUM(\n",
         "      CASE\n",
-        "        WHEN status = 'SUCCESS' THEN 1\n",
+        "        WHEN result_state = 'SUCCEEDED' THEN 1\n",
         "        ELSE 0\n",
         "      END\n",
         "    )\n",
@@ -136,9 +142,27 @@
         "    1\n",
         "  ) AS taxa_sucesso_pct\n",
         "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_jobs\n",
+        "  workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
         "WHERE\n",
-        "  COALESCE(fim_ts, created_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS"
+        "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  AND (:ambiente IS NULL OR array_contains(:ambiente, INITCAP(ambiente)))\n",
+        "  AND (:tipo_execucao IS NULL OR array_contains(:tipo_execucao, CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automático' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END))"
+      ],
+      "parameters": [
+        {
+          "displayName": "Ambiente",
+          "keyword": "ambiente",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {}
+        },
+        {
+          "displayName": "Tipo de Execução",
+          "keyword": "tipo_execucao",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {}
+        }
       ],
       "catalog": "workspace",
       "schema": "proj_cvm_dev_05_apoio"
@@ -162,15 +186,33 @@
         "  ROUND(AVG(duracao_segundos) / 60.0, 1) AS duracao_minutos,\n",
         "  'Pipeline Completo' AS barra\n",
         "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes\n",
+        "  workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "WHERE\n",
-        "  COALESCE(fim_ts, created_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  COALESCE(period_end_time, execucao_created_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
         "  AND duracao_segundos IS NOT NULL\n",
         "  AND task_key IS NOT NULL\n",
+        "  AND (:ambiente IS NULL OR array_contains(:ambiente, INITCAP(ambiente)))\n",
+        "  AND (:tipo_execucao IS NULL OR array_contains(:tipo_execucao, CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automático' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END))\n",
         "GROUP BY\n",
         "  task_key\n",
         "ORDER BY\n",
         "  duracao_minutos DESC"
+      ],
+      "parameters": [
+        {
+          "displayName": "Ambiente",
+          "keyword": "ambiente",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {}
+        },
+        {
+          "displayName": "Tipo de Execução",
+          "keyword": "tipo_execucao",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {}
+        }
       ],
       "catalog": "workspace",
       "schema": "proj_cvm_dev_05_apoio"
@@ -182,25 +224,25 @@
         "SELECT\n",
         "  COALESCE(SUM(registros_processados), 0) AS total_registros\n",
         "FROM\n",
-        "  observabilidade_execucoes\n",
+        "  workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "WHERE\n",
         "  run_id\n",
         "    = (\n",
         "      SELECT\n",
-        "        j.run_id\n",
+        "        run_id\n",
         "      FROM\n",
-        "        observabilidade_jobs j\n",
+        "        workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
         "      WHERE\n",
-        "        j.run_id IN (\n",
+        "        run_id IN (\n",
         "          SELECT DISTINCT\n",
         "            run_id\n",
         "          FROM\n",
-        "            observabilidade_execucoes\n",
+        "            workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes\n",
         "          WHERE\n",
         "            run_id IS NOT NULL\n",
         "        )\n",
         "      ORDER BY\n",
-        "        COALESCE(j.fim_ts, j.created_at) DESC\n",
+        "        COALESCE(period_end_time, ingested_at) DESC\n",
         "      LIMIT 1\n",
         "    )"
       ],
@@ -218,10 +260,11 @@
         "      WHEN\n",
         "        ano = 2021\n",
         "      THEN\n",
-        "        CASE status\n",
-        "          WHEN 'SUCCESS' THEN '✅'\n",
+        "        CASE task_result_state\n",
+        "          WHEN 'SUCCEEDED' THEN '✅'\n",
         "          WHEN 'FAILED' THEN '❌'\n",
-        "          WHEN 'RUNNING' THEN '🔄'\n",
+        "          WHEN 'ERROR' THEN '❌'\n",
+        "          WHEN 'CANCELLED' THEN '⚠️'\n",
         "          ELSE '—'\n",
         "        END\n",
         "    END\n",
@@ -231,10 +274,11 @@
         "      WHEN\n",
         "        ano = 2022\n",
         "      THEN\n",
-        "        CASE status\n",
-        "          WHEN 'SUCCESS' THEN '✅'\n",
+        "        CASE task_result_state\n",
+        "          WHEN 'SUCCEEDED' THEN '✅'\n",
         "          WHEN 'FAILED' THEN '❌'\n",
-        "          WHEN 'RUNNING' THEN '🔄'\n",
+        "          WHEN 'ERROR' THEN '❌'\n",
+        "          WHEN 'CANCELLED' THEN '⚠️'\n",
         "          ELSE '—'\n",
         "        END\n",
         "    END\n",
@@ -244,10 +288,11 @@
         "      WHEN\n",
         "        ano = 2023\n",
         "      THEN\n",
-        "        CASE status\n",
-        "          WHEN 'SUCCESS' THEN '✅'\n",
+        "        CASE task_result_state\n",
+        "          WHEN 'SUCCEEDED' THEN '✅'\n",
         "          WHEN 'FAILED' THEN '❌'\n",
-        "          WHEN 'RUNNING' THEN '🔄'\n",
+        "          WHEN 'ERROR' THEN '❌'\n",
+        "          WHEN 'CANCELLED' THEN '⚠️'\n",
         "          ELSE '—'\n",
         "        END\n",
         "    END\n",
@@ -257,10 +302,11 @@
         "      WHEN\n",
         "        ano = 2024\n",
         "      THEN\n",
-        "        CASE status\n",
-        "          WHEN 'SUCCESS' THEN '✅'\n",
+        "        CASE task_result_state\n",
+        "          WHEN 'SUCCEEDED' THEN '✅'\n",
         "          WHEN 'FAILED' THEN '❌'\n",
-        "          WHEN 'RUNNING' THEN '🔄'\n",
+        "          WHEN 'ERROR' THEN '❌'\n",
+        "          WHEN 'CANCELLED' THEN '⚠️'\n",
         "          ELSE '—'\n",
         "        END\n",
         "    END\n",
@@ -270,10 +316,11 @@
         "      WHEN\n",
         "        ano = 2025\n",
         "      THEN\n",
-        "        CASE status\n",
-        "          WHEN 'SUCCESS' THEN '✅'\n",
+        "        CASE task_result_state\n",
+        "          WHEN 'SUCCEEDED' THEN '✅'\n",
         "          WHEN 'FAILED' THEN '❌'\n",
-        "          WHEN 'RUNNING' THEN '🔄'\n",
+        "          WHEN 'ERROR' THEN '❌'\n",
+        "          WHEN 'CANCELLED' THEN '⚠️'\n",
         "          ELSE '—'\n",
         "        END\n",
         "    END\n",
@@ -283,10 +330,11 @@
         "      WHEN\n",
         "        ano = 2026\n",
         "      THEN\n",
-        "        CASE status\n",
-        "          WHEN 'SUCCESS' THEN '✅'\n",
+        "        CASE task_result_state\n",
+        "          WHEN 'SUCCEEDED' THEN '✅'\n",
         "          WHEN 'FAILED' THEN '❌'\n",
-        "          WHEN 'RUNNING' THEN '🔄'\n",
+        "          WHEN 'ERROR' THEN '❌'\n",
+        "          WHEN 'CANCELLED' THEN '⚠️'\n",
         "          ELSE '—'\n",
         "        END\n",
         "    END\n",
@@ -296,10 +344,10 @@
         "    SELECT\n",
         "      fonte,\n",
         "      ano,\n",
-        "      status,\n",
-        "      ROW_NUMBER() OVER (PARTITION BY fonte, ano ORDER BY fim_ts DESC) AS rn\n",
+        "      task_result_state,\n",
+        "      ROW_NUMBER() OVER (PARTITION BY fonte, ano ORDER BY period_end_time DESC) AS rn\n",
         "    FROM\n",
-        "      workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes\n",
+        "      workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "    WHERE\n",
         "      fonte IS NOT NULL\n",
         "      AND ano IS NOT NULL\n",
@@ -336,31 +384,31 @@
         "SELECT\n",
         "  COUNT(*) AS total_checks\n",
         "FROM\n",
-        "  observabilidade_guardrails g\n",
+        "  workspace.proj_cvm_dev_05_apoio.observabilidade_guardrails g\n",
         "WHERE\n",
         "  g.id_execucao IN (\n",
         "    SELECT\n",
         "      e.id_execucao\n",
         "    FROM\n",
-        "      observabilidade_execucoes e\n",
+        "      workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes e\n",
         "    WHERE\n",
         "      e.run_id\n",
         "        = (\n",
         "          SELECT\n",
-        "            j.run_id\n",
+        "            r.run_id\n",
         "          FROM\n",
-        "            observabilidade_jobs j\n",
+        "            workspace.proj_cvm_dev_05_apoio.observabilidade_runs r\n",
         "          WHERE\n",
-        "            j.run_id IN (\n",
+        "            r.run_id IN (\n",
         "              SELECT DISTINCT\n",
         "                run_id\n",
         "              FROM\n",
-        "                observabilidade_execucoes\n",
+        "                workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes\n",
         "              WHERE\n",
         "                run_id IS NOT NULL\n",
         "            )\n",
         "          ORDER BY\n",
-        "            COALESCE(j.fim_ts, j.created_at) DESC\n",
+        "            COALESCE(r.period_end_time, r.ingested_at) DESC\n",
         "          LIMIT 1\n",
         "        )\n",
         "  )"
@@ -385,31 +433,31 @@
         "    1\n",
         "  ) AS taxa_pass_pct\n",
         "FROM\n",
-        "  observabilidade_guardrails g\n",
+        "  workspace.proj_cvm_dev_05_apoio.observabilidade_guardrails g\n",
         "WHERE\n",
         "  g.id_execucao IN (\n",
         "    SELECT\n",
         "      e.id_execucao\n",
         "    FROM\n",
-        "      observabilidade_execucoes e\n",
+        "      workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes e\n",
         "    WHERE\n",
         "      e.run_id\n",
         "        = (\n",
         "          SELECT\n",
-        "            j.run_id\n",
+        "            r.run_id\n",
         "          FROM\n",
-        "            observabilidade_jobs j\n",
+        "            workspace.proj_cvm_dev_05_apoio.observabilidade_runs r\n",
         "          WHERE\n",
-        "            j.run_id IN (\n",
+        "            r.run_id IN (\n",
         "              SELECT DISTINCT\n",
         "                run_id\n",
         "              FROM\n",
-        "                observabilidade_execucoes\n",
+        "                workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes\n",
         "              WHERE\n",
         "                run_id IS NOT NULL\n",
         "            )\n",
         "          ORDER BY\n",
-        "            COALESCE(j.fim_ts, j.created_at) DESC\n",
+        "            COALESCE(r.period_end_time, r.ingested_at) DESC\n",
         "          LIMIT 1\n",
         "        )\n",
         "  )"
@@ -522,31 +570,53 @@
       "queryLines": [
         "SELECT\n",
         "  CASE\n",
-        "    WHEN status = 'SUCCESS' THEN '✓ SAUDÁVEL'\n",
-        "    WHEN status = 'RUNNING' THEN '↻ EM EXECUÇÃO'\n",
-        "    WHEN status IS NULL THEN '⏸ AGUARDANDO'\n",
+        "    WHEN result_state = 'SUCCEEDED' THEN '✓ SAUDÁVEL'\n",
+        "    WHEN result_state IS NULL THEN '⏸ AGUARDANDO'\n",
         "    ELSE '⚠ ATENÇÃO NECESSÁRIA'\n",
         "  END AS status_visual,\n",
         "  CONCAT(\n",
         "    'Última execução: ',\n",
-        "    DATE_FORMAT(fim_ts, 'dd/MM às HH:mm'),\n",
+        "    DATE_FORMAT(period_end_time, 'dd/MM às HH:mm'),\n",
         "    ' • Duração: ',\n",
         "    CASE\n",
         "      WHEN\n",
-        "        duracao_segundos >= 60\n",
+        "        DATEDIFF(SECOND, period_start_time, period_end_time) >= 60\n",
         "      THEN\n",
-        "        CONCAT(FLOOR(duracao_segundos / 60), 'min ', ROUND(duracao_segundos % 60), 's')\n",
-        "      ELSE CONCAT(ROUND(duracao_segundos), ' segundos')\n",
+        "        CONCAT(\n",
+        "          FLOOR(DATEDIFF(SECOND, period_start_time, period_end_time) / 60),\n",
+        "          'min ',\n",
+        "          ROUND(DATEDIFF(SECOND, period_start_time, period_end_time) % 60),\n",
+        "          's'\n",
+        "        )\n",
+        "      ELSE CONCAT(ROUND(DATEDIFF(SECOND, period_start_time, period_end_time)), ' segundos')\n",
         "    END\n",
         "  ) AS detalhes,\n",
-        "  status AS status_raw\n",
+        "  result_state AS status_raw\n",
         "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_jobs\n",
+        "  workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
         "WHERE\n",
-        "  COALESCE(fim_ts, created_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  AND (:ambiente IS NULL OR array_contains(:ambiente, INITCAP(ambiente)))\n",
+        "  AND (:tipo_execucao IS NULL OR array_contains(:tipo_execucao, CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automático' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END))\n",
         "ORDER BY\n",
-        "  COALESCE(fim_ts, created_at) DESC\n",
+        "  COALESCE(period_end_time, ingested_at) DESC\n",
         "LIMIT 1"
+      ],
+      "parameters": [
+        {
+          "displayName": "Ambiente",
+          "keyword": "ambiente",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {}
+        },
+        {
+          "displayName": "Tipo de Execução",
+          "keyword": "tipo_execucao",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {}
+        }
       ]
     },
     {
@@ -554,16 +624,35 @@
       "displayName": "Histórico Duração Diária (7 dias)",
       "queryLines": [
         "SELECT\n",
-        "  DATE_FORMAT(fim_ts, 'dd/MM HH:mm') AS Data,\n",
-        "  ROUND(duracao_segundos / 60.0, 1) AS duracao_minutos,\n",
+        "  DATE_FORMAT(period_end_time, 'dd/MM HH:mm') AS Data,\n",
+        "  ROUND(DATEDIFF(SECOND, period_start_time, period_end_time) / 60.0, 1) AS duracao_minutos,\n",
         "  run_id\n",
         "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_jobs\n",
+        "  workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
         "WHERE\n",
-        "  fim_ts >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
-        "  AND duracao_segundos IS NOT NULL\n",
+        "  period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  AND period_start_time IS NOT NULL\n",
+        "  AND period_end_time IS NOT NULL\n",
+        "  AND (:ambiente IS NULL OR array_contains(:ambiente, INITCAP(ambiente)))\n",
+        "  AND (:tipo_execucao IS NULL OR array_contains(:tipo_execucao, CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automático' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END))\n",
         "ORDER BY\n",
-        "  fim_ts ASC"
+        "  period_end_time ASC"
+      ],
+      "parameters": [
+        {
+          "displayName": "Ambiente",
+          "keyword": "ambiente",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {}
+        },
+        {
+          "displayName": "Tipo de Execução",
+          "keyword": "tipo_execucao",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {}
+        }
       ]
     },
     {
@@ -572,49 +661,56 @@
       "queryLines": [
         "SELECT\n",
         "  job_name AS Pipeline,\n",
-        "  DATE_FORMAT(fim_ts, 'dd/MM/yyyy HH:mm') AS `Concluído em`,\n",
+        "  DATE_FORMAT(period_end_time, 'dd/MM/yyyy HH:mm') AS `Concluído em`,\n",
         "  CASE\n",
         "    WHEN\n",
-        "      duracao_segundos >= 60\n",
+        "      DATEDIFF(SECOND, period_start_time, period_end_time) >= 60\n",
         "    THEN\n",
-        "      CONCAT(FLOOR(duracao_segundos / 60), 'min ', ROUND(duracao_segundos % 60), 's')\n",
-        "    ELSE CONCAT(ROUND(duracao_segundos), ' seg')\n",
+        "      CONCAT(\n",
+        "        FLOOR(DATEDIFF(SECOND, period_start_time, period_end_time) / 60),\n",
+        "        'min ',\n",
+        "        ROUND(DATEDIFF(SECOND, period_start_time, period_end_time) % 60),\n",
+        "        's'\n",
+        "      )\n",
+        "    ELSE CONCAT(ROUND(DATEDIFF(SECOND, period_start_time, period_end_time)), ' seg')\n",
         "  END AS `Tempo de Execução`,\n",
+        "  INITCAP(ambiente) AS Ambiente,\n",
         "  CASE\n",
-        "    WHEN\n",
-        "      LOWER(job_name) LIKE '%[dev%'\n",
-        "      OR LOWER(job_name) LIKE '%dev]%'\n",
-        "    THEN\n",
-        "      'Dev'\n",
-        "    WHEN\n",
-        "      LOWER(job_name) LIKE '%[test%'\n",
-        "      OR LOWER(job_name) LIKE '%test]%'\n",
-        "    THEN\n",
-        "      'Test'\n",
-        "    WHEN\n",
-        "      LOWER(job_name) LIKE '%[prod%'\n",
-        "      OR LOWER(job_name) LIKE '%prod]%'\n",
-        "    THEN\n",
-        "      'Prod'\n",
-        "    ELSE 'N/D'\n",
-        "  END AS Ambiente,\n",
-        "  CASE\n",
-        "    WHEN LOWER(trigger_type) IN ('scheduled', 'periodic') THEN 'Automático'\n",
-        "    WHEN LOWER(trigger_type) = 'one_time' THEN 'Manual'\n",
+        "    WHEN LOWER(trigger_type) = 'cron' THEN 'Automático'\n",
+        "    WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual'\n",
         "    ELSE trigger_type\n",
         "  END AS `Tipo de Execução`,\n",
         "  CASE\n",
-        "    WHEN status = 'SUCCESS' THEN 'Sucesso'\n",
-        "    WHEN status = 'RUNNING' THEN 'Executando'\n",
-        "    WHEN status = 'FAILED' THEN 'Falhou'\n",
-        "    ELSE status\n",
+        "    WHEN result_state = 'SUCCEEDED' THEN 'Sucesso'\n",
+        "    WHEN result_state = 'FAILED' THEN 'Falhou'\n",
+        "    WHEN result_state = 'CANCELLED' THEN 'Cancelado'\n",
+        "    WHEN result_state = 'ERROR' THEN 'Erro'\n",
+        "    ELSE result_state\n",
         "  END AS Resultado\n",
         "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_jobs\n",
+        "  workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
         "WHERE\n",
-        "  COALESCE(fim_ts, created_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  AND (:ambiente IS NULL OR array_contains(:ambiente, INITCAP(ambiente)))\n",
+        "  AND (:tipo_execucao IS NULL OR array_contains(:tipo_execucao, CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automático' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END))\n",
         "ORDER BY\n",
-        "  COALESCE(fim_ts, created_at) DESC"
+        "  COALESCE(period_end_time, ingested_at) DESC"
+      ],
+      "parameters": [
+        {
+          "displayName": "Ambiente",
+          "keyword": "ambiente",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {}
+        },
+        {
+          "displayName": "Tipo de Execução",
+          "keyword": "tipo_execucao",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {}
+        }
       ]
     },
     {
@@ -622,28 +718,12 @@
       "displayName": "Filtro: Ambiente",
       "queryLines": [
         "SELECT DISTINCT\n",
-        "  CASE\n",
-        "    WHEN\n",
-        "      LOWER(job_name) LIKE '%[dev%'\n",
-        "      OR LOWER(job_name) LIKE '%dev]%'\n",
-        "    THEN\n",
-        "      'Dev'\n",
-        "    WHEN\n",
-        "      LOWER(job_name) LIKE '%[test%'\n",
-        "      OR LOWER(job_name) LIKE '%test]%'\n",
-        "    THEN\n",
-        "      'Test'\n",
-        "    WHEN\n",
-        "      LOWER(job_name) LIKE '%[prod%'\n",
-        "      OR LOWER(job_name) LIKE '%prod]%'\n",
-        "    THEN\n",
-        "      'Prod'\n",
-        "    ELSE 'N/D'\n",
-        "  END AS Ambiente\n",
+        "  INITCAP(ambiente) AS Ambiente\n",
         "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_jobs\n",
+        "  workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
         "WHERE\n",
-        "  COALESCE(fim_ts, created_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  AND ambiente IS NOT NULL\n",
         "ORDER BY\n",
         "  Ambiente"
       ]
@@ -654,14 +734,14 @@
       "queryLines": [
         "SELECT DISTINCT\n",
         "  CASE\n",
-        "    WHEN LOWER(trigger_type) IN ('scheduled', 'periodic') THEN 'Automático'\n",
-        "    WHEN LOWER(trigger_type) = 'one_time' THEN 'Manual'\n",
+        "    WHEN LOWER(trigger_type) = 'cron' THEN 'Automático'\n",
+        "    WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual'\n",
         "    ELSE trigger_type\n",
         "  END AS `Tipo de Execução`\n",
         "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_jobs\n",
+        "  workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
         "WHERE\n",
-        "  COALESCE(fim_ts, created_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
         "ORDER BY\n",
         "  `Tipo de Execução`"
       ]
@@ -672,49 +752,52 @@
       "queryLines": [
         "WITH ultima_run AS (\n",
         "  SELECT\n",
-        "    e.run_id,\n",
-        "    MAX(j.fim_ts) AS max_fim_ts\n",
+        "    run_id,\n",
+        "    MAX(period_end_time) AS max_fim_ts\n",
         "  FROM\n",
-        "    workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes e\n",
-        "      INNER JOIN workspace.proj_cvm_dev_05_apoio.observabilidade_jobs j\n",
-        "        ON e.run_id = j.run_id\n",
+        "    workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "  WHERE\n",
-        "    e.run_id IS NOT NULL\n",
-        "    AND e.registros_processados IS NOT NULL\n",
-        "    AND e.registros_processados > 0\n",
-        "    AND e.duracao_segundos IS NOT NULL\n",
-        "    AND e.duracao_segundos > 0\n",
-        "    AND j.fim_ts IS NOT NULL\n",
+        "    run_id IS NOT NULL\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND registros_processados > 0\n",
+        "    AND duracao_segundos IS NOT NULL\n",
+        "    AND duracao_segundos > 0\n",
+        "    AND period_end_time IS NOT NULL\n",
         "  GROUP BY\n",
-        "    e.run_id\n",
+        "    run_id\n",
         "  ORDER BY\n",
         "    max_fim_ts DESC\n",
         "  LIMIT 1\n",
         ")\n",
         "SELECT\n",
-        "  e.fonte,\n",
-        "  e.etapa,\n",
+        "  fonte,\n",
+        "  etapa,\n",
         "  ROUND(\n",
-        "    SUM(e.registros_processados) / NULLIF(SUM(e.duracao_segundos) / 60.0, 0),\n",
+        "    SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
         "    1\n",
         "  ) AS throughput_reg_min,\n",
-        "  SUM(e.registros_processados) AS total_registros,\n",
-        "  ROUND(SUM(e.duracao_segundos) / 60.0, 1) AS total_duracao_min\n",
+        "  SUM(registros_processados) AS total_registros,\n",
+        "  ROUND(SUM(duracao_segundos) / 60.0, 1) AS total_duracao_min\n",
         "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes e\n",
-        "    INNER JOIN ultima_run r\n",
-        "      ON e.run_id = r.run_id\n",
+        "  workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "WHERE\n",
-        "  e.fonte IS NOT NULL\n",
-        "  AND e.etapa IN ('bronze', 'silver')\n",
-        "  AND e.registros_processados IS NOT NULL\n",
-        "  AND e.duracao_segundos IS NOT NULL\n",
+        "  run_id\n",
+        "    = (\n",
+        "      SELECT\n",
+        "        run_id\n",
+        "      FROM\n",
+        "        ultima_run\n",
+        "    )\n",
+        "  AND fonte IS NOT NULL\n",
+        "  AND etapa IN ('bronze', 'silver')\n",
+        "  AND registros_processados IS NOT NULL\n",
+        "  AND duracao_segundos IS NOT NULL\n",
         "GROUP BY\n",
-        "  e.fonte,\n",
-        "  e.etapa\n",
+        "  fonte,\n",
+        "  etapa\n",
         "ORDER BY\n",
-        "  e.fonte,\n",
-        "  e.etapa"
+        "  fonte,\n",
+        "  etapa"
       ]
     },
     {
@@ -725,21 +808,22 @@
         "  fonte,\n",
         "  ano,\n",
         "  CASE\n",
-        "    WHEN status = 'SUCCESS' THEN '✅'\n",
-        "    WHEN status = 'FAILED' THEN '❌'\n",
-        "    WHEN status = 'RUNNING' THEN '🔄'\n",
+        "    WHEN task_result_state = 'SUCCEEDED' THEN '✅'\n",
+        "    WHEN task_result_state = 'FAILED' THEN '❌'\n",
+        "    WHEN task_result_state = 'ERROR' THEN '❌'\n",
+        "    WHEN task_result_state = 'CANCELLED' THEN '⚠️'\n",
         "    ELSE '❓'\n",
         "  END AS status_emoji,\n",
-        "  status AS status_raw\n",
+        "  task_result_state AS status_raw\n",
         "FROM\n",
         "  (\n",
         "    SELECT\n",
         "      fonte,\n",
         "      ano,\n",
-        "      status,\n",
-        "      ROW_NUMBER() OVER (PARTITION BY fonte, ano ORDER BY fim_ts DESC) AS rn\n",
+        "      task_result_state,\n",
+        "      ROW_NUMBER() OVER (PARTITION BY fonte, ano ORDER BY period_end_time DESC) AS rn\n",
         "    FROM\n",
-        "      workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes\n",
+        "      workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "    WHERE\n",
         "      fonte IS NOT NULL\n",
         "      AND ano IS NOT NULL\n",
@@ -757,42 +841,39 @@
       "queryLines": [
         "WITH ultima_run AS (\n",
         "  SELECT\n",
-        "    e.run_id,\n",
-        "    MAX(j.fim_ts) AS max_fim_ts\n",
+        "    run_id,\n",
+        "    MAX(period_end_time) AS max_fim_ts\n",
         "  FROM\n",
-        "    workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes e\n",
-        "      INNER JOIN workspace.proj_cvm_dev_05_apoio.observabilidade_jobs j\n",
-        "        ON e.run_id = j.run_id\n",
+        "    workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "  WHERE\n",
-        "    e.run_id IS NOT NULL\n",
-        "    AND e.registros_processados IS NOT NULL\n",
-        "    AND e.registros_processados > 0\n",
-        "    AND e.duracao_segundos IS NOT NULL\n",
-        "    AND e.duracao_segundos > 0\n",
-        "    AND j.fim_ts IS NOT NULL\n",
+        "    run_id IS NOT NULL\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND registros_processados > 0\n",
+        "    AND duracao_segundos IS NOT NULL\n",
+        "    AND duracao_segundos > 0\n",
+        "    AND period_end_time IS NOT NULL\n",
         "  GROUP BY\n",
-        "    e.run_id\n",
+        "    run_id\n",
         "  ORDER BY\n",
         "    max_fim_ts DESC\n",
         "  LIMIT 1\n",
         "),\n",
         "kpis_ultima AS (\n",
         "  SELECT\n",
-        "    SUM(e.registros_processados) AS volume_total,\n",
-        "    ROUND(SUM(e.duracao_segundos) / 60.0, 1) AS duracao_total_min,\n",
+        "    SUM(registros_processados) AS volume_total,\n",
+        "    ROUND(SUM(duracao_segundos) / 60.0, 1) AS duracao_total_min,\n",
         "    ROUND(\n",
-        "      SUM(e.registros_processados) / NULLIF(SUM(e.duracao_segundos) / 60.0, 0),\n",
+        "      SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
         "      0\n",
         "    ) AS throughput_reg_min,\n",
-        "    COUNT(DISTINCT e.id_execucao) AS total_execucoes,\n",
-        "    COUNT(DISTINCT CASE WHEN e.registros_processados > 0 THEN e.id_execucao END) AS execucoes_completas\n",
+        "    COUNT(DISTINCT id_execucao) AS total_execucoes,\n",
+        "    COUNT(DISTINCT CASE WHEN registros_processados > 0 THEN id_execucao END) AS execucoes_completas\n",
         "  FROM\n",
-        "    workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes e\n",
-        "      INNER JOIN ultima_run r\n",
-        "        ON e.run_id = r.run_id\n",
+        "    workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "  WHERE\n",
-        "    e.registros_processados IS NOT NULL\n",
-        "    AND e.duracao_segundos IS NOT NULL\n",
+        "    run_id = (SELECT run_id FROM ultima_run)\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND duracao_segundos IS NOT NULL\n",
         "),\n",
         "kpis_48h AS (\n",
         "  SELECT\n",
@@ -804,25 +885,23 @@
         "  FROM\n",
         "    (\n",
         "      SELECT\n",
-        "        e.run_id,\n",
-        "        SUM(e.registros_processados) AS volume_total,\n",
-        "        ROUND(SUM(e.duracao_segundos) / 60.0, 1) AS duracao_total_min,\n",
+        "        run_id,\n",
+        "        SUM(registros_processados) AS volume_total,\n",
+        "        ROUND(SUM(duracao_segundos) / 60.0, 1) AS duracao_total_min,\n",
         "        ROUND(\n",
-        "          SUM(e.registros_processados) / NULLIF(SUM(e.duracao_segundos) / 60.0, 0),\n",
+        "          SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
         "          0\n",
         "        ) AS throughput_reg_min\n",
         "      FROM\n",
-        "        workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes e\n",
-        "          INNER JOIN workspace.proj_cvm_dev_05_apoio.observabilidade_jobs j\n",
-        "            ON e.run_id = j.run_id\n",
+        "        workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "      WHERE\n",
-        "        j.fim_ts >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
-        "        AND e.registros_processados IS NOT NULL\n",
-        "        AND e.registros_processados > 0\n",
-        "        AND e.duracao_segundos IS NOT NULL\n",
-        "        AND e.duracao_segundos > 0\n",
+        "        period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "        AND registros_processados IS NOT NULL\n",
+        "        AND registros_processados > 0\n",
+        "        AND duracao_segundos IS NOT NULL\n",
+        "        AND duracao_segundos > 0\n",
         "      GROUP BY\n",
-        "        e.run_id\n",
+        "        run_id\n",
         "    ) sub\n",
         ")\n",
         "SELECT\n",
@@ -856,45 +935,48 @@
       "queryLines": [
         "WITH ultima_run AS (\n",
         "  SELECT\n",
-        "    e.run_id,\n",
-        "    MAX(j.fim_ts) AS max_fim_ts\n",
+        "    run_id,\n",
+        "    MAX(period_end_time) AS max_fim_ts\n",
         "  FROM\n",
-        "    workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes e\n",
-        "      INNER JOIN workspace.proj_cvm_dev_05_apoio.observabilidade_jobs j\n",
-        "        ON e.run_id = j.run_id\n",
+        "    workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "  WHERE\n",
-        "    e.run_id IS NOT NULL\n",
-        "    AND e.registros_processados IS NOT NULL\n",
-        "    AND e.registros_processados > 0\n",
-        "    AND e.duracao_segundos IS NOT NULL\n",
-        "    AND e.duracao_segundos > 0\n",
-        "    AND j.fim_ts IS NOT NULL\n",
+        "    run_id IS NOT NULL\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND registros_processados > 0\n",
+        "    AND duracao_segundos IS NOT NULL\n",
+        "    AND duracao_segundos > 0\n",
+        "    AND period_end_time IS NOT NULL\n",
         "  GROUP BY\n",
-        "    e.run_id\n",
+        "    run_id\n",
         "  ORDER BY\n",
         "    max_fim_ts DESC\n",
         "  LIMIT 1\n",
         "),\n",
         "metricas_ultima AS (\n",
         "  SELECT\n",
-        "    e.fonte,\n",
-        "    e.etapa,\n",
+        "    fonte,\n",
+        "    etapa,\n",
         "    ROUND(\n",
-        "      SUM(e.registros_processados) / NULLIF(SUM(e.duracao_segundos) / 60.0, 0),\n",
+        "      SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
         "      0\n",
         "    ) AS throughput_atual\n",
         "  FROM\n",
-        "    workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes e\n",
-        "      INNER JOIN ultima_run r\n",
-        "        ON e.run_id = r.run_id\n",
+        "    workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "  WHERE\n",
-        "    e.fonte IS NOT NULL\n",
-        "    AND e.etapa IN ('bronze', 'silver')\n",
-        "    AND e.registros_processados IS NOT NULL\n",
-        "    AND e.duracao_segundos IS NOT NULL\n",
+        "    run_id\n",
+        "      = (\n",
+        "        SELECT\n",
+        "          run_id\n",
+        "        FROM\n",
+        "          ultima_run\n",
+        "      )\n",
+        "    AND fonte IS NOT NULL\n",
+        "    AND etapa IN ('bronze', 'silver')\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND duracao_segundos IS NOT NULL\n",
         "  GROUP BY\n",
-        "    e.fonte,\n",
-        "    e.etapa\n",
+        "    fonte,\n",
+        "    etapa\n",
         "),\n",
         "baselines AS (\n",
         "  SELECT\n",
@@ -904,29 +986,27 @@
         "  FROM\n",
         "    (\n",
         "      SELECT\n",
-        "        e.fonte,\n",
-        "        e.etapa,\n",
-        "        e.run_id,\n",
+        "        fonte,\n",
+        "        etapa,\n",
+        "        run_id,\n",
         "        ROUND(\n",
-        "          SUM(e.registros_processados) / NULLIF(SUM(e.duracao_segundos) / 60.0, 0),\n",
+        "          SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
         "          0\n",
         "        ) AS throughput_run\n",
         "      FROM\n",
-        "        workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes e\n",
-        "          INNER JOIN workspace.proj_cvm_dev_05_apoio.observabilidade_jobs j\n",
-        "            ON e.run_id = j.run_id\n",
+        "        workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "      WHERE\n",
-        "        j.fim_ts >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
-        "        AND e.fonte IS NOT NULL\n",
-        "        AND e.etapa IN ('bronze', 'silver')\n",
-        "        AND e.registros_processados IS NOT NULL\n",
-        "        AND e.registros_processados > 0\n",
-        "        AND e.duracao_segundos IS NOT NULL\n",
-        "        AND e.duracao_segundos > 0\n",
+        "        period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "        AND fonte IS NOT NULL\n",
+        "        AND etapa IN ('bronze', 'silver')\n",
+        "        AND registros_processados IS NOT NULL\n",
+        "        AND registros_processados > 0\n",
+        "        AND duracao_segundos IS NOT NULL\n",
+        "        AND duracao_segundos > 0\n",
         "      GROUP BY\n",
-        "        e.fonte,\n",
-        "        e.etapa,\n",
-        "        e.run_id\n",
+        "        fonte,\n",
+        "        etapa,\n",
+        "        run_id\n",
         "    ) sub\n",
         "  GROUP BY\n",
         "    fonte,\n",
@@ -1003,12 +1083,12 @@
       "queryLines": [
         "SELECT DISTINCT\n",
         "  run_id,\n",
-        "  DATE_FORMAT(fim_ts, 'dd/MM HH:mm') AS run_timestamp,\n",
-        "  CONCAT(run_id, ' - ', DATE_FORMAT(fim_ts, 'dd/MM HH:mm')) AS run_label\n",
+        "  DATE_FORMAT(period_end_time, 'dd/MM HH:mm') AS run_timestamp,\n",
+        "  CONCAT(run_id, ' - ', DATE_FORMAT(period_end_time, 'dd/MM HH:mm')) AS run_label\n",
         "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_jobs\n",
+        "  workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
         "WHERE\n",
-        "  fim_ts IS NOT NULL\n",
+        "  period_end_time IS NOT NULL\n",
         "ORDER BY\n",
         "  run_id DESC\n",
         "LIMIT 20"
@@ -1075,33 +1155,31 @@
       "queryLines": [
         "WITH run_metrics AS (\n",
         "  SELECT\n",
-        "    MAX(j.fim_ts) AS run_period,\n",
-        "    SUM(e.registros_processados) AS volume_total,\n",
-        "    ROUND(SUM(e.duracao_segundos) / 60.0, 1) AS duracao_total_min,\n",
+        "    MAX(period_end_time) AS run_period,\n",
+        "    SUM(registros_processados) AS volume_total,\n",
+        "    ROUND(SUM(duracao_segundos) / 60.0, 1) AS duracao_total_min,\n",
         "    ROUND(\n",
-        "      SUM(e.registros_processados) / NULLIF(SUM(e.duracao_segundos) / 60.0, 0),\n",
+        "      SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
         "      0\n",
         "    ) AS throughput_reg_min,\n",
-        "    COUNT(DISTINCT e.id_execucao) AS total_execucoes,\n",
+        "    COUNT(DISTINCT id_execucao) AS total_execucoes,\n",
         "    COUNT(DISTINCT\n",
         "      CASE\n",
-        "        WHEN e.registros_processados > 0 THEN e.id_execucao\n",
+        "        WHEN registros_processados > 0 THEN id_execucao\n",
         "      END\n",
         "    ) AS execucoes_completas\n",
         "  FROM\n",
-        "    workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes e\n",
-        "      INNER JOIN workspace.proj_cvm_dev_05_apoio.observabilidade_jobs j\n",
-        "        ON e.run_id = j.run_id\n",
+        "    workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "  WHERE\n",
-        "    j.fim_ts >= CURRENT_TIMESTAMP() - INTERVAL 48 HOURS\n",
-        "    AND e.run_id IS NOT NULL\n",
-        "    AND e.registros_processados IS NOT NULL\n",
-        "    AND e.registros_processados > 0\n",
-        "    AND e.duracao_segundos IS NOT NULL\n",
-        "    AND e.duracao_segundos > 0\n",
-        "    AND j.fim_ts IS NOT NULL\n",
+        "    period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 48 HOURS\n",
+        "    AND run_id IS NOT NULL\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND registros_processados > 0\n",
+        "    AND duracao_segundos IS NOT NULL\n",
+        "    AND duracao_segundos > 0\n",
+        "    AND period_end_time IS NOT NULL\n",
         "  GROUP BY\n",
-        "    j.run_id\n",
+        "    run_id\n",
         "),\n",
         "baselines AS (\n",
         "  SELECT\n",
@@ -1505,7 +1583,7 @@
             "name": "filtro_ambiente",
             "queries": [
               {
-                "name": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc1498c4145db9adc1a9421f44e8_Ambiente",
+                "name": "dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410aeb7e8637b294dfbda_Ambiente",
                 "query": {
                   "datasetName": "filtro_ambiente",
                   "fields": [
@@ -1520,20 +1598,125 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410adbf87db4a15e5ca1d_ambiente",
+                "query": {
+                  "datasetName": "orq_execucoes_48h",
+                  "parameters": [
+                    {
+                      "name": "ambiente",
+                      "keyword": "ambiente"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410aba940bde4168e225f_ambiente",
+                "query": {
+                  "datasetName": "orq_status_hero",
+                  "parameters": [
+                    {
+                      "name": "ambiente",
+                      "keyword": "ambiente"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410a0aba3abe44197c2c6_ambiente",
+                "query": {
+                  "datasetName": "orq_media_5runs",
+                  "parameters": [
+                    {
+                      "name": "ambiente",
+                      "keyword": "ambiente"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410a1a23a983c495c7aa0_ambiente",
+                "query": {
+                  "datasetName": "orq_taxa_sucesso",
+                  "parameters": [
+                    {
+                      "name": "ambiente",
+                      "keyword": "ambiente"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410acb5fa705650d98a08_ambiente",
+                "query": {
+                  "datasetName": "orq_duracao_formatada",
+                  "parameters": [
+                    {
+                      "name": "ambiente",
+                      "keyword": "ambiente"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410a28e1927e9f01d301e_ambiente",
+                "query": {
+                  "datasetName": "orq_task_breakdown",
+                  "parameters": [
+                    {
+                      "name": "ambiente",
+                      "keyword": "ambiente"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
               "version": 2,
               "frame": {
                 "showTitle": true,
-                "title": "Ambiente"
+                "title": {
+                  "fields": [],
+                  "value": "Ambiente"
+                }
               },
               "widgetType": "filter-multi-select",
               "encodings": {
                 "fields": [
                   {
                     "fieldName": "Ambiente",
-                    "queryName": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc1498c4145db9adc1a9421f44e8_Ambiente"
+                    "queryName": "dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410aeb7e8637b294dfbda_Ambiente"
+                  },
+                  {
+                    "parameterName": "ambiente",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410adbf87db4a15e5ca1d_ambiente"
+                  },
+                  {
+                    "parameterName": "ambiente",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410aba940bde4168e225f_ambiente"
+                  },
+                  {
+                    "parameterName": "ambiente",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410a0aba3abe44197c2c6_ambiente"
+                  },
+                  {
+                    "parameterName": "ambiente",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410a1a23a983c495c7aa0_ambiente"
+                  },
+                  {
+                    "parameterName": "ambiente",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410acb5fa705650d98a08_ambiente"
+                  },
+                  {
+                    "parameterName": "ambiente",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410a28e1927e9f01d301e_ambiente"
                   }
                 ]
               }
@@ -1551,7 +1734,7 @@
             "name": "filtro_tipo_exec",
             "queries": [
               {
-                "name": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc1499091a38990d999172033ecf_Tipo de Execução",
+                "name": "dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410afbe3150e4afa2e70d_Tipo de Execução",
                 "query": {
                   "datasetName": "filtro_tipo_exec",
                   "fields": [
@@ -1566,20 +1749,125 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410adbf87db4a15e5ca1d_tipo_execucao",
+                "query": {
+                  "datasetName": "orq_execucoes_48h",
+                  "parameters": [
+                    {
+                      "name": "tipo_execucao",
+                      "keyword": "tipo_execucao"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410aba940bde4168e225f_tipo_execucao",
+                "query": {
+                  "datasetName": "orq_status_hero",
+                  "parameters": [
+                    {
+                      "name": "tipo_execucao",
+                      "keyword": "tipo_execucao"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410a0aba3abe44197c2c6_tipo_execucao",
+                "query": {
+                  "datasetName": "orq_media_5runs",
+                  "parameters": [
+                    {
+                      "name": "tipo_execucao",
+                      "keyword": "tipo_execucao"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410a1a23a983c495c7aa0_tipo_execucao",
+                "query": {
+                  "datasetName": "orq_taxa_sucesso",
+                  "parameters": [
+                    {
+                      "name": "tipo_execucao",
+                      "keyword": "tipo_execucao"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410acb5fa705650d98a08_tipo_execucao",
+                "query": {
+                  "datasetName": "orq_duracao_formatada",
+                  "parameters": [
+                    {
+                      "name": "tipo_execucao",
+                      "keyword": "tipo_execucao"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410a28e1927e9f01d301e_tipo_execucao",
+                "query": {
+                  "datasetName": "orq_task_breakdown",
+                  "parameters": [
+                    {
+                      "name": "tipo_execucao",
+                      "keyword": "tipo_execucao"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
               "version": 2,
               "frame": {
                 "showTitle": true,
-                "title": "Tipo de execução"
+                "title": {
+                  "fields": [],
+                  "value": "Tipo de execução"
+                }
               },
               "widgetType": "filter-multi-select",
               "encodings": {
                 "fields": [
                   {
                     "fieldName": "Tipo de Execução",
-                    "queryName": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc1499091a38990d999172033ecf_Tipo de Execução"
+                    "queryName": "dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410afbe3150e4afa2e70d_Tipo de Execução"
+                  },
+                  {
+                    "parameterName": "tipo_execucao",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410adbf87db4a15e5ca1d_tipo_execucao"
+                  },
+                  {
+                    "parameterName": "tipo_execucao",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410aba940bde4168e225f_tipo_execucao"
+                  },
+                  {
+                    "parameterName": "tipo_execucao",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410a0aba3abe44197c2c6_tipo_execucao"
+                  },
+                  {
+                    "parameterName": "tipo_execucao",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410a1a23a983c495c7aa0_tipo_execucao"
+                  },
+                  {
+                    "parameterName": "tipo_execucao",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410acb5fa705650d98a08_tipo_execucao"
+                  },
+                  {
+                    "parameterName": "tipo_execucao",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c1efa9a410a28e1927e9f01d301e_tipo_execucao"
                   }
                 ]
               }
