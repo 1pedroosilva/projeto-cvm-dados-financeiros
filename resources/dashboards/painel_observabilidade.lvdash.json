@@ -17,7 +17,7 @@
         "  encontrado,\n",
         "  registros_afetados,\n",
         "  detalhes,\n",
-        "  ts_check\n",
+        "  from_utc_timestamp(ts_check, 'America/Sao_Paulo') AS ts_check\n",
         "FROM\n",
         "  workspace.proj_cvm_dev_05_apoio.observabilidade_guardrails\n",
         "ORDER BY\n",
@@ -62,7 +62,7 @@
       "queryLines": [
         "SELECT\n",
         "  job_name AS Pipeline,\n",
-        "  DATE_FORMAT(period_end_time, 'dd/MM/yyyy HH:mm') AS `Concluído em`,\n",
+        "  DATE_FORMAT(from_utc_timestamp(period_end_time, 'America/Sao_Paulo'), 'dd/MM/yyyy HH:mm') AS `Concluído em`,\n",
         "  CASE\n",
         "    WHEN\n",
         "      DATEDIFF(SECOND, period_start_time, period_end_time) >= 60\n",
@@ -181,18 +181,33 @@
         "    WHEN task_key = 'silver_bpp' THEN 'Silver - BPP'\n",
         "    WHEN task_key = 'silver_dre' THEN 'Silver - DRE'\n",
         "    WHEN task_key = 'verificacao_landing' THEN 'Verificação Diária'\n",
+        "    WHEN task_key = 'ddl_create_tables' THEN 'Preparação de Tabelas'\n",
+        "    WHEN task_key = 'transposicao_system' THEN 'Transposição Sistema'\n",
         "    ELSE task_key\n",
         "  END AS Etapa,\n",
-        "  ROUND(AVG(duracao_segundos) / 60.0, 1) AS duracao_minutos,\n",
+        "  ROUND(AVG(COALESCE(duracao_segundos, task_duracao_segundos)) / 60.0, 1) AS duracao_minutos,\n",
         "  'Pipeline Completo' AS barra\n",
         "FROM\n",
         "  workspace.proj_cvm_dev_05_apoio.base_unificada\n",
         "WHERE\n",
         "  COALESCE(period_end_time, execucao_created_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
-        "  AND duracao_segundos IS NOT NULL\n",
+        "  AND COALESCE(duracao_segundos, task_duracao_segundos) IS NOT NULL\n",
         "  AND task_key IS NOT NULL\n",
-        "  AND (:ambiente IS NULL OR array_contains(:ambiente, INITCAP(ambiente)))\n",
-        "  AND (:tipo_execucao IS NULL OR array_contains(:tipo_execucao, CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automático' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END))\n",
+        "  AND (\n",
+        "    :ambiente IS NULL\n",
+        "    OR array_contains(:ambiente, INITCAP(ambiente))\n",
+        "  )\n",
+        "  AND (\n",
+        "    :tipo_execucao IS NULL\n",
+        "    OR array_contains(\n",
+        "      :tipo_execucao,\n",
+        "      CASE\n",
+        "        WHEN LOWER(trigger_type) = 'cron' THEN 'Automático'\n",
+        "        WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual'\n",
+        "        ELSE trigger_type\n",
+        "      END\n",
+        "    )\n",
+        "  )\n",
         "GROUP BY\n",
         "  task_key\n",
         "ORDER BY\n",
@@ -204,14 +219,22 @@
           "keyword": "ambiente",
           "dataType": "STRING",
           "complexType": "MULTI",
-          "defaultSelection": {}
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
         },
         {
           "displayName": "Tipo de Execução",
           "keyword": "tipo_execucao",
           "dataType": "STRING",
           "complexType": "MULTI",
-          "defaultSelection": {}
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
         }
       ],
       "catalog": "workspace",
@@ -489,118 +512,69 @@
       "schema": "proj_cvm_dev_05_apoio"
     },
     {
-      "name": "ing_data_recente",
-      "displayName": "Ingestão Mais Recente",
-      "queryLines": [
-        "SELECT\n",
-        "  MAX(ingest_ts) AS data_ingestao_recente\n",
-        "FROM\n",
-        "  controle_ingestao\n",
-        "WHERE\n",
-        "  status = 'SUCCESS'"
-      ],
-      "catalog": "workspace",
-      "schema": "proj_cvm_dev_05_apoio"
-    },
-    {
-      "name": "ing_freshness",
-      "displayName": "Freshness por Fonte/Ano",
-      "queryLines": [
-        "SELECT\n",
-        "  fonte,\n",
-        "  ano,\n",
-        "  last_modified_cvm,\n",
-        "  ingest_ts,\n",
-        "  versao_ingestao,\n",
-        "  status,\n",
-        "  DATEDIFF(CURRENT_DATE(), DATE(ingest_ts)) AS dias_desde_ingestao\n",
-        "FROM\n",
-        "  (\n",
-        "    SELECT\n",
-        "      fonte,\n",
-        "      ano,\n",
-        "      last_modified_cvm,\n",
-        "      ingest_ts,\n",
-        "      versao_ingestao,\n",
-        "      status,\n",
-        "      ROW_NUMBER() OVER (PARTITION BY fonte, ano ORDER BY ingest_ts DESC) AS rn\n",
-        "    FROM\n",
-        "      controle_ingestao\n",
-        "  )\n",
-        "WHERE\n",
-        "  rn = 1\n",
-        "ORDER BY\n",
-        "  dias_desde_ingestao DESC"
-      ],
-      "catalog": "workspace",
-      "schema": "proj_cvm_dev_05_apoio"
-    },
-    {
-      "name": "ing_bytes_ano",
-      "displayName": "Bytes por Ano",
-      "queryLines": [
-        "SELECT\n",
-        "  ano,\n",
-        "  SUM(bytes_arquivo) AS total_bytes\n",
-        "FROM\n",
-        "  (\n",
-        "    SELECT\n",
-        "      fonte,\n",
-        "      ano,\n",
-        "      bytes_arquivo,\n",
-        "      ROW_NUMBER() OVER (PARTITION BY fonte, ano ORDER BY ingest_ts DESC) AS rn\n",
-        "    FROM\n",
-        "      controle_ingestao\n",
-        "    WHERE\n",
-        "      bytes_arquivo IS NOT NULL\n",
-        "  ) sub\n",
-        "WHERE\n",
-        "  rn = 1\n",
-        "GROUP BY\n",
-        "  ano\n",
-        "ORDER BY\n",
-        "  ano"
-      ],
-      "catalog": "workspace",
-      "schema": "proj_cvm_dev_05_apoio"
-    },
-    {
       "name": "orq_status_hero",
-      "displayName": "Status Hero Pipeline",
+      "displayName": "Status Saúde Pipeline",
       "queryLines": [
+        "WITH falha_recente AS (\n",
+        "  SELECT\n",
+        "    COUNT(*) AS total\n",
+        "  FROM\n",
+        "    workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
+        "  WHERE\n",
+        "    result_state != 'SUCCEEDED'\n",
+        "    AND period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "),\n",
+        "semanal_executou AS (\n",
+        "  SELECT\n",
+        "    COUNT(*) AS total\n",
+        "  FROM\n",
+        "    workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
+        "  WHERE\n",
+        "    job_name LIKE '%CVM - Pipeline Completo Semanal'\n",
+        "    AND result_state = 'SUCCEEDED'\n",
+        "    AND period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 8 DAYS\n",
+        "),\n",
+        "diario_executou AS (\n",
+        "  SELECT\n",
+        "    COUNT(*) AS total\n",
+        "  FROM\n",
+        "    workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
+        "  WHERE\n",
+        "    job_name LIKE '%CVM - Verificação Diária Landing Zone'\n",
+        "    AND result_state = 'SUCCEEDED'\n",
+        "    AND period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 26 HOURS\n",
+        ")\n",
         "SELECT\n",
         "  CASE\n",
-        "    WHEN result_state = 'SUCCEEDED' THEN '✓ SAUDÁVEL'\n",
-        "    WHEN result_state IS NULL THEN '⏸ AGUARDANDO'\n",
-        "    ELSE '⚠ ATENÇÃO NECESSÁRIA'\n",
-        "  END AS status_visual,\n",
-        "  CONCAT(\n",
-        "    'Última execução: ',\n",
-        "    DATE_FORMAT(period_end_time, 'dd/MM às HH:mm'),\n",
-        "    ' • Duração: ',\n",
-        "    CASE\n",
-        "      WHEN\n",
-        "        DATEDIFF(SECOND, period_start_time, period_end_time) >= 60\n",
-        "      THEN\n",
-        "        CONCAT(\n",
-        "          FLOOR(DATEDIFF(SECOND, period_start_time, period_end_time) / 60),\n",
-        "          'min ',\n",
-        "          ROUND(DATEDIFF(SECOND, period_start_time, period_end_time) % 60),\n",
-        "          's'\n",
-        "        )\n",
-        "      ELSE CONCAT(ROUND(DATEDIFF(SECOND, period_start_time, period_end_time)), ' segundos')\n",
-        "    END\n",
-        "  ) AS detalhes,\n",
-        "  result_state AS status_raw\n",
-        "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
-        "WHERE\n",
-        "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
-        "  AND (:ambiente IS NULL OR array_contains(:ambiente, INITCAP(ambiente)))\n",
-        "  AND (:tipo_execucao IS NULL OR array_contains(:tipo_execucao, CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automático' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END))\n",
-        "ORDER BY\n",
-        "  COALESCE(period_end_time, ingested_at) DESC\n",
-        "LIMIT 1"
+        "    WHEN\n",
+        "      (\n",
+        "        SELECT\n",
+        "          total\n",
+        "        FROM\n",
+        "          falha_recente\n",
+        "      ) > 0\n",
+        "    THEN\n",
+        "      'ALERTA — falha em run recente'\n",
+        "    WHEN\n",
+        "      (\n",
+        "        SELECT\n",
+        "          total\n",
+        "        FROM\n",
+        "          semanal_executou\n",
+        "      ) = 0\n",
+        "    THEN\n",
+        "      'ALERTA — pipeline semanal atrasado'\n",
+        "    WHEN\n",
+        "      (\n",
+        "        SELECT\n",
+        "          total\n",
+        "        FROM\n",
+        "          diario_executou\n",
+        "      ) = 0\n",
+        "    THEN\n",
+        "      'ALERTA — verificação diária atrasada'\n",
+        "    ELSE '✓ SAUDÁVEL'\n",
+        "  END AS status_pipeline"
       ],
       "parameters": [
         {
@@ -608,14 +582,22 @@
           "keyword": "ambiente",
           "dataType": "STRING",
           "complexType": "MULTI",
-          "defaultSelection": {}
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
         },
         {
           "displayName": "Tipo de Execução",
           "keyword": "tipo_execucao",
           "dataType": "STRING",
           "complexType": "MULTI",
-          "defaultSelection": {}
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
         }
       ]
     },
@@ -624,7 +606,7 @@
       "displayName": "Histórico Duração Diária (7 dias)",
       "queryLines": [
         "SELECT\n",
-        "  DATE_FORMAT(period_end_time, 'dd/MM HH:mm') AS Data,\n",
+        "  DATE_FORMAT(from_utc_timestamp(period_end_time, 'America/Sao_Paulo'), 'dd/MM HH:mm') AS Data,\n",
         "  ROUND(DATEDIFF(SECOND, period_start_time, period_end_time) / 60.0, 1) AS duracao_minutos,\n",
         "  run_id\n",
         "FROM\n",
@@ -633,8 +615,21 @@
         "  period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
         "  AND period_start_time IS NOT NULL\n",
         "  AND period_end_time IS NOT NULL\n",
-        "  AND (:ambiente IS NULL OR array_contains(:ambiente, INITCAP(ambiente)))\n",
-        "  AND (:tipo_execucao IS NULL OR array_contains(:tipo_execucao, CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automático' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END))\n",
+        "  AND (\n",
+        "    :ambiente IS NULL\n",
+        "    OR array_contains(:ambiente, INITCAP(ambiente))\n",
+        "  )\n",
+        "  AND (\n",
+        "    :tipo_execucao IS NULL\n",
+        "    OR array_contains(\n",
+        "      :tipo_execucao,\n",
+        "      CASE\n",
+        "        WHEN LOWER(trigger_type) = 'cron' THEN 'Automático'\n",
+        "        WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual'\n",
+        "        ELSE trigger_type\n",
+        "      END\n",
+        "    )\n",
+        "  )\n",
         "ORDER BY\n",
         "  period_end_time ASC"
       ],
@@ -644,14 +639,22 @@
           "keyword": "ambiente",
           "dataType": "STRING",
           "complexType": "MULTI",
-          "defaultSelection": {}
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
         },
         {
           "displayName": "Tipo de Execução",
           "keyword": "tipo_execucao",
           "dataType": "STRING",
           "complexType": "MULTI",
-          "defaultSelection": {}
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
         }
       ]
     },
@@ -661,7 +664,7 @@
       "queryLines": [
         "SELECT\n",
         "  job_name AS Pipeline,\n",
-        "  DATE_FORMAT(period_end_time, 'dd/MM/yyyy HH:mm') AS `Concluído em`,\n",
+        "  DATE_FORMAT(from_utc_timestamp(period_end_time, 'America/Sao_Paulo'), 'dd/MM/yyyy HH:mm') AS `Concluído em`,\n",
         "  CASE\n",
         "    WHEN\n",
         "      DATEDIFF(SECOND, period_start_time, period_end_time) >= 60\n",
@@ -683,7 +686,7 @@
         "  CASE\n",
         "    WHEN result_state = 'SUCCEEDED' THEN 'Sucesso'\n",
         "    WHEN result_state = 'FAILED' THEN 'Falhou'\n",
-        "    WHEN result_state = 'CANCELLED' THEN 'Cancelado'\n",
+        "    WHEN result_state = 'CANCELADO' THEN 'Cancelado'\n",
         "    WHEN result_state = 'ERROR' THEN 'Erro'\n",
         "    ELSE result_state\n",
         "  END AS Resultado\n",
@@ -691,8 +694,21 @@
         "  workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
         "WHERE\n",
         "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
-        "  AND (:ambiente IS NULL OR array_contains(:ambiente, INITCAP(ambiente)))\n",
-        "  AND (:tipo_execucao IS NULL OR array_contains(:tipo_execucao, CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automático' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END))\n",
+        "  AND (\n",
+        "    :ambiente IS NULL\n",
+        "    OR array_contains(:ambiente, INITCAP(ambiente))\n",
+        "  )\n",
+        "  AND (\n",
+        "    :tipo_execucao IS NULL\n",
+        "    OR array_contains(\n",
+        "      :tipo_execucao,\n",
+        "      CASE\n",
+        "        WHEN LOWER(trigger_type) = 'cron' THEN 'Automático'\n",
+        "        WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual'\n",
+        "        ELSE trigger_type\n",
+        "      END\n",
+        "    )\n",
+        "  )\n",
         "ORDER BY\n",
         "  COALESCE(period_end_time, ingested_at) DESC"
       ],
@@ -702,14 +718,22 @@
           "keyword": "ambiente",
           "dataType": "STRING",
           "complexType": "MULTI",
-          "defaultSelection": {}
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
         },
         {
           "displayName": "Tipo de Execução",
           "keyword": "tipo_execucao",
           "dataType": "STRING",
           "complexType": "MULTI",
-          "defaultSelection": {}
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
         }
       ]
     },
@@ -1078,53 +1102,8 @@
       ]
     },
     {
-      "name": "filtro_runs",
-      "displayName": "Filtro: Últimas Runs",
-      "queryLines": [
-        "SELECT DISTINCT\n",
-        "  run_id,\n",
-        "  DATE_FORMAT(period_end_time, 'dd/MM HH:mm') AS run_timestamp,\n",
-        "  CONCAT(run_id, ' - ', DATE_FORMAT(period_end_time, 'dd/MM HH:mm')) AS run_label\n",
-        "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_runs\n",
-        "WHERE\n",
-        "  period_end_time IS NOT NULL\n",
-        "ORDER BY\n",
-        "  run_id DESC\n",
-        "LIMIT 20"
-      ]
-    },
-    {
-      "name": "filtro_fonte",
-      "displayName": "Filtro: Fonte",
-      "queryLines": [
-        "SELECT DISTINCT\n",
-        "  fonte\n",
-        "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes\n",
-        "WHERE\n",
-        "  fonte IS NOT NULL\n",
-        "ORDER BY\n",
-        "  fonte"
-      ]
-    },
-    {
-      "name": "filtro_etapa",
-      "displayName": "Filtro: Etapa",
-      "queryLines": [
-        "SELECT DISTINCT\n",
-        "  etapa\n",
-        "FROM\n",
-        "  workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes\n",
-        "WHERE\n",
-        "  etapa IS NOT NULL\n",
-        "ORDER BY\n",
-        "  etapa"
-      ]
-    },
-    {
       "name": "exe_scatter_melhorado",
-      "displayName": "Scatter Duração×Registros",
+      "displayName": "Scatter Duração×Registros (pipeline bronze/silver)",
       "queryLines": [
         "SELECT\n",
         "  id_execucao,\n",
@@ -1141,7 +1120,8 @@
         "WHERE\n",
         "  registros_processados IS NOT NULL\n",
         "  AND duracao_segundos IS NOT NULL\n",
-        "  AND etapa IN ('bronze', 'silver', 'verificacao')\n",
+        "  AND etapa IN ('bronze', 'silver')\n",
+        "  AND fim_ts >= CURRENT_TIMESTAMP() - INTERVAL 35 DAYS\n",
         "ORDER BY\n",
         "  run_id DESC,\n",
         "  etapa"
@@ -1151,64 +1131,591 @@
     },
     {
       "name": "exe_kpis_periodo",
-      "displayName": "KPIs Execução por Período (48h)",
+      "displayName": "KPIs Execução por Semana (pipeline bronze/silver)",
       "queryLines": [
-        "WITH run_metrics AS (\n",
+        "WITH pipeline_execs AS (\n",
         "  SELECT\n",
-        "    MAX(period_end_time) AS run_period,\n",
+        "    run_id,\n",
+        "    id_execucao,\n",
+        "    registros_processados,\n",
+        "    duracao_segundos,\n",
+        "    from_utc_timestamp(fim_ts, 'America/Sao_Paulo') AS fim_local,\n",
+        "    CAST(date_trunc('week', from_utc_timestamp(fim_ts, 'America/Sao_Paulo')) AS DATE) AS semana\n",
+        "  FROM\n",
+        "    workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes\n",
+        "  WHERE\n",
+        "    etapa IN ('bronze', 'silver')\n",
+        "    AND run_id IS NOT NULL\n",
+        "    AND fim_ts IS NOT NULL\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND registros_processados > 0\n",
+        "    AND duracao_segundos IS NOT NULL\n",
+        "    AND duracao_segundos > 0\n",
+        "),\n",
+        "run_metrics AS (\n",
+        "  SELECT\n",
+        "    run_id,\n",
+        "    MAX(semana) AS semana,\n",
+        "    MAX(fim_local) AS run_period,\n",
         "    SUM(registros_processados) AS volume_total,\n",
         "    ROUND(SUM(duracao_segundos) / 60.0, 1) AS duracao_total_min,\n",
         "    ROUND(\n",
         "      SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
         "      0\n",
-        "    ) AS throughput_reg_min,\n",
-        "    COUNT(DISTINCT id_execucao) AS total_execucoes,\n",
-        "    COUNT(DISTINCT\n",
-        "      CASE\n",
-        "        WHEN registros_processados > 0 THEN id_execucao\n",
-        "      END\n",
-        "    ) AS execucoes_completas\n",
+        "    ) AS throughput_reg_min\n",
         "  FROM\n",
-        "    workspace.proj_cvm_dev_05_apoio.base_unificada\n",
-        "  WHERE\n",
-        "    period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 48 HOURS\n",
-        "    AND run_id IS NOT NULL\n",
-        "    AND registros_processados IS NOT NULL\n",
-        "    AND registros_processados > 0\n",
-        "    AND duracao_segundos IS NOT NULL\n",
-        "    AND duracao_segundos > 0\n",
-        "    AND period_end_time IS NOT NULL\n",
+        "    pipeline_execs\n",
         "  GROUP BY\n",
         "    run_id\n",
         "),\n",
-        "baselines AS (\n",
+        "week_metrics AS (\n",
         "  SELECT\n",
-        "    ROUND(AVG(volume_total), 0) AS baseline_volume,\n",
-        "    ROUND(AVG(throughput_reg_min), 0) AS baseline_throughput,\n",
-        "    ROUND(AVG(duracao_total_min), 1) AS baseline_duracao,\n",
-        "    ROUND(AVG(execucoes_completas), 0) AS baseline_completude\n",
+        "    semana,\n",
+        "    COUNT(*) AS runs_na_semana,\n",
+        "    AVG(volume_total) AS sem_volume,\n",
+        "    AVG(duracao_total_min) AS sem_duracao,\n",
+        "    AVG(throughput_reg_min) AS sem_throughput\n",
         "  FROM\n",
         "    run_metrics\n",
+        "  GROUP BY\n",
+        "    semana\n",
+        "),\n",
+        "baselines AS (\n",
+        "  SELECT\n",
+        "    r.run_id,\n",
+        "    ROUND(AVG(w.sem_volume), 0) AS baseline_volume,\n",
+        "    ROUND(AVG(w.sem_throughput), 0) AS baseline_throughput,\n",
+        "    ROUND(AVG(w.sem_duracao), 1) AS baseline_duracao,\n",
+        "    ROUND(AVG(w.runs_na_semana), 0) AS baseline_runs,\n",
+        "    COUNT(w.semana) AS semanas_baseline,\n",
+        "    SUM(w.runs_na_semana) + 1 AS total_runs_analise\n",
+        "  FROM\n",
+        "    run_metrics r\n",
+        "      JOIN week_metrics w\n",
+        "        ON w.semana >= DATE_SUB(r.semana, 28)\n",
+        "        AND w.semana < r.semana\n",
+        "  GROUP BY\n",
+        "    r.run_id\n",
         ")\n",
         "SELECT\n",
         "  r.run_period,\n",
         "  r.volume_total,\n",
         "  r.duracao_total_min,\n",
         "  r.throughput_reg_min,\n",
-        "  r.total_execucoes,\n",
-        "  r.execucoes_completas,\n",
+        "  w.runs_na_semana,\n",
         "  b.baseline_volume,\n",
         "  b.baseline_throughput,\n",
         "  b.baseline_duracao,\n",
-        "  b.baseline_completude\n",
+        "  b.baseline_runs,\n",
+        "  b.semanas_baseline,\n",
+        "  b.total_runs_analise\n",
         "FROM\n",
-        "  run_metrics r CROSS JOIN baselines b\n",
+        "  run_metrics r\n",
+        "    JOIN week_metrics w\n",
+        "      ON w.semana = r.semana\n",
+        "    LEFT JOIN baselines b\n",
+        "      ON b.run_id = r.run_id\n",
         "ORDER BY\n",
-        "  r.run_period ASC"
+        "  r.run_period DESC"
+      ]
+    },
+    {
+      "name": "exe_volume_breakdown",
+      "displayName": "Volume por Fonte/Ano/Etapa por Semana (35 dias)",
+      "queryLines": [
+        "SELECT\n",
+        "  CAST(date_trunc('week', from_utc_timestamp(fim_ts, 'America/Sao_Paulo')) AS DATE) AS semana,\n",
+        "  fonte,\n",
+        "  ano,\n",
+        "  etapa,\n",
+        "  SUM(registros_processados) AS registros\n",
+        "FROM\n",
+        "  workspace.proj_cvm_dev_05_apoio.observabilidade_execucoes\n",
+        "WHERE\n",
+        "  etapa IN ('bronze', 'silver')\n",
+        "  AND fonte IS NOT NULL\n",
+        "  AND ano IS NOT NULL\n",
+        "  AND registros_processados IS NOT NULL\n",
+        "  AND fim_ts >= CURRENT_TIMESTAMP() - INTERVAL 35 DAYS\n",
+        "GROUP BY\n",
+        "  semana,\n",
+        "  fonte,\n",
+        "  ano,\n",
+        "  etapa\n",
+        "ORDER BY\n",
+        "  semana DESC,\n",
+        "  fonte,\n",
+        "  ano,\n",
+        "  etapa"
+      ]
+    },
+    {
+      "name": "ing_status_geral",
+      "displayName": "Status Geral da Ingestão",
+      "queryLines": [
+        "SELECT\n",
+        "  MAX(DATEDIFF(CURRENT_DATE(), CAST(ingest_ts AS DATE))) AS max_dias_atraso,\n",
+        "  COUNT(DISTINCT fonte) AS fontes_ativas,\n",
+        "  MIN(CAST(ingest_ts AS DATE)) AS ingestao_mais_antiga,\n",
+        "  MAX(CAST(ingest_ts AS DATE)) AS ingestao_mais_recente\n",
+        "FROM\n",
+        "  workspace.proj_cvm_dev_05_apoio.controle_ingestao\n",
+        "WHERE\n",
+        "  status = 'SUCCESS'\n",
+        "  AND fonte NOT IN ('landing_verificacao')"
+      ]
+    },
+    {
+      "name": "ing_dias_por_fonte",
+      "displayName": "Dias de Atraso por Fonte",
+      "queryLines": [
+        "SELECT\n",
+        "  fonte,\n",
+        "  MAX(CAST(ingest_ts AS DATE)) AS ultima_ingestao,\n",
+        "  DATEDIFF(CURRENT_DATE(), MAX(CAST(ingest_ts AS DATE))) AS dias_atraso\n",
+        "FROM\n",
+        "  workspace.proj_cvm_dev_05_apoio.controle_ingestao\n",
+        "WHERE\n",
+        "  status = 'SUCCESS'\n",
+        "  AND fonte NOT IN ('landing_verificacao')\n",
+        "GROUP BY\n",
+        "  fonte\n",
+        "ORDER BY\n",
+        "  dias_atraso DESC"
+      ]
+    },
+    {
+      "name": "ing_cobertura_fonte_ano",
+      "displayName": "Cobertura por Fonte e Ano",
+      "queryLines": [
+        "SELECT\n",
+        "  fonte,\n",
+        "  ano,\n",
+        "  CASE\n",
+        "    WHEN COUNT(*) > 0 THEN 'OK'\n",
+        "    ELSE 'AUSENTE'\n",
+        "  END AS cobertura\n",
+        "FROM\n",
+        "  workspace.proj_cvm_dev_05_apoio.controle_ingestao\n",
+        "WHERE\n",
+        "  status = 'SUCCESS'\n",
+        "  AND fonte NOT IN ('landing_verificacao')\n",
+        "GROUP BY\n",
+        "  fonte,\n",
+        "  ano\n",
+        "ORDER BY\n",
+        "  ano DESC,\n",
+        "  fonte"
+      ]
+    },
+    {
+      "name": "ing_incidentes",
+      "displayName": "Incidentes de Ingestão",
+      "queryLines": [
+        "SELECT\n",
+        "  ingest_ts,\n",
+        "  fonte,\n",
+        "  ano,\n",
+        "  status,\n",
+        "  mensagem,\n",
+        "  ROUND(bytes_arquivo / 1048576.0, 2) AS tamanho_mb\n",
+        "FROM\n",
+        "  workspace.proj_cvm_dev_05_apoio.controle_ingestao\n",
+        "WHERE\n",
+        "  (\n",
+        "    status NOT IN ('SUCCESS', 'SKIPPED')\n",
+        "    OR (\n",
+        "      status = 'SKIPPED'\n",
+        "      AND mensagem IS NOT NULL\n",
+        "      AND mensagem != 'null'\n",
+        "    )\n",
+        "  )\n",
+        "  AND fonte NOT IN ('landing_verificacao')\n",
+        "ORDER BY\n",
+        "  ingest_ts DESC\n",
+        "LIMIT 20"
       ]
     }
   ],
   "pages": [
+    {
+      "name": "ingestao",
+      "displayName": "Ingestão",
+      "layout": [
+        {
+          "widget": {
+            "name": "ing_dias_atraso",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_status_geral",
+                  "fields": [
+                    {
+                      "name": "max_dias_atraso",
+                      "expression": "`max_dias_atraso`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Dias desde última ingestão"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max_dias_atraso",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  },
+                  "formatTemplate": "{{ @formatted }} dias"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ing_fontes_ativas",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_status_geral",
+                  "fields": [
+                    {
+                      "name": "fontes_ativas",
+                      "expression": "`fontes_ativas`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Fontes ativas"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "fontes_ativas",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ing_mais_recente",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_status_geral",
+                  "fields": [
+                    {
+                      "name": "ingestao_mais_recente",
+                      "expression": "`ingestao_mais_recente`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Ingestão mais recente"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "ingestao_mais_recente"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ing_bar_dias_fonte",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_dias_por_fonte",
+                  "fields": [
+                    {
+                      "name": "dias_atraso",
+                      "expression": "`dias_atraso`"
+                    },
+                    {
+                      "name": "fonte",
+                      "expression": "`fonte`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Dias desde última ingestão por fonte"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "dias_atraso",
+                  "displayName": "",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "fonte",
+                  "displayName": "",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "ing_pivot_cobertura",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_cobertura_fonte_ano",
+                  "fields": [
+                    {
+                      "name": "fonte",
+                      "expression": "`fonte`"
+                    },
+                    {
+                      "name": "ano",
+                      "expression": "`ano`"
+                    },
+                    {
+                      "name": "cobertura",
+                      "expression": "`cobertura`"
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "fonte"
+                        ]
+                      },
+                      {
+                        "fieldNames": [
+                          "ano"
+                        ]
+                      }
+                    ]
+                  },
+                  "disaggregated": true,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`fonte`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`ano`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Cobertura por fonte e ano"
+              },
+              "version": 3,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": [
+                  {
+                    "fieldName": "fonte",
+                    "scale": {
+                      "type": "categorical"
+                    }
+                  }
+                ],
+                "columns": [
+                  {
+                    "fieldName": "ano",
+                    "scale": {
+                      "type": "categorical"
+                    }
+                  }
+                ],
+                "cell": {
+                  "type": "single-cell",
+                  "fieldName": "cobertura"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "ing_tab_incidentes",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_incidentes",
+                  "fields": [
+                    {
+                      "name": "ingest_ts",
+                      "expression": "`ingest_ts`"
+                    },
+                    {
+                      "name": "fonte",
+                      "expression": "`fonte`"
+                    },
+                    {
+                      "name": "ano",
+                      "expression": "`ano`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "mensagem",
+                      "expression": "`mensagem`"
+                    },
+                    {
+                      "name": "tamanho_mb",
+                      "expression": "`tamanho_mb`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Incidentes de ingestão"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "ingest_ts"
+                  },
+                  {
+                    "fieldName": "fonte"
+                  },
+                  {
+                    "fieldName": "ano"
+                  },
+                  {
+                    "fieldName": "status"
+                  },
+                  {
+                    "fieldName": "mensagem"
+                  },
+                  {
+                    "fieldName": "tamanho_mb"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
     {
       "name": "c625375b",
       "displayName": "Orquestração",
@@ -1543,8 +2050,8 @@
                   "datasetName": "orq_status_hero",
                   "fields": [
                     {
-                      "name": "status_visual",
-                      "expression": "`status_visual`"
+                      "name": "status_pipeline",
+                      "expression": "`status_pipeline`"
                     }
                   ],
                   "disaggregated": true
@@ -1554,6 +2061,7 @@
             "spec": {
               "frame": {
                 "showTitle": true,
+                "contentAlignment": "left",
                 "title": {
                   "value": "Status do pipeline (últimos 7 dias)",
                   "fields": []
@@ -1563,7 +2071,7 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "status_visual"
+                  "fieldName": "status_pipeline"
                 }
               },
               "data": {
@@ -1574,7 +2082,7 @@
           "position": {
             "x": 0,
             "y": 0,
-            "width": 3,
+            "width": 12,
             "height": 2
           }
         },
@@ -2019,9 +2527,9 @@
             }
           },
           "position": {
-            "x": 6,
-            "y": 8,
-            "width": 6,
+            "x": 5,
+            "y": 5,
+            "width": 7,
             "height": 6
           }
         },
@@ -2146,8 +2654,8 @@
           },
           "position": {
             "x": 0,
-            "y": 8,
-            "width": 6,
+            "y": 5,
+            "width": 5,
             "height": 6
           }
         },
@@ -2156,162 +2664,15 @@
             "name": "contexto_temporal",
             "multilineTextboxSpec": {
               "lines": [
-                "**Janela de dados:** Últimos 7 dias | **Baseline:** Média dos últimos 7 dias"
+                "**Cada semana pesa 1, independentemente do nº de execuções** | Semanas sem execução ficam fora da média | A semana corrente nunca entra na própria baseline"
               ]
             }
           },
           "position": {
             "x": 0,
-            "y": 7,
+            "y": 4,
             "width": 12,
             "height": 1
-          }
-        },
-        {
-          "widget": {
-            "name": "filtro_run",
-            "queries": [
-              {
-                "name": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc2a7ef81a6e8a364c9bd9868dac_run_id",
-                "query": {
-                  "datasetName": "filtro_runs",
-                  "fields": [
-                    {
-                      "name": "run_id",
-                      "expression": "`run_id`"
-                    },
-                    {
-                      "name": "run_id_associativity",
-                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Run (id)",
-                  "fields": []
-                }
-              },
-              "widgetType": "filter-single-select",
-              "encodings": {
-                "fields": [
-                  {
-                    "fieldName": "run_id",
-                    "queryName": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc2a7ef81a6e8a364c9bd9868dac_run_id"
-                  }
-                ]
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 2,
-            "width": 4,
-            "height": 2
-          }
-        },
-        {
-          "widget": {
-            "name": "filtro_fonte",
-            "queries": [
-              {
-                "name": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc2a7fa91368baaa3dda2376ec37_fonte",
-                "query": {
-                  "datasetName": "filtro_fonte",
-                  "fields": [
-                    {
-                      "name": "fonte",
-                      "expression": "`fonte`"
-                    },
-                    {
-                      "name": "fonte_associativity",
-                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Fonte",
-                  "fields": []
-                }
-              },
-              "widgetType": "filter-multi-select",
-              "encodings": {
-                "fields": [
-                  {
-                    "fieldName": "fonte",
-                    "queryName": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc2a7fa91368baaa3dda2376ec37_fonte"
-                  }
-                ]
-              }
-            }
-          },
-          "position": {
-            "x": 4,
-            "y": 2,
-            "width": 4,
-            "height": 2
-          }
-        },
-        {
-          "widget": {
-            "name": "filtro_etapa",
-            "queries": [
-              {
-                "name": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc2a810a1984aacb66039c097bdd_etapa",
-                "query": {
-                  "datasetName": "filtro_etapa",
-                  "fields": [
-                    {
-                      "name": "etapa",
-                      "expression": "`etapa`"
-                    },
-                    {
-                      "name": "etapa_associativity",
-                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Etapa",
-                  "fields": []
-                }
-              },
-              "widgetType": "filter-multi-select",
-              "encodings": {
-                "fields": [
-                  {
-                    "fieldName": "etapa",
-                    "queryName": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc2a810a1984aacb66039c097bdd_etapa"
-                  }
-                ]
-              }
-            }
-          },
-          "position": {
-            "x": 8,
-            "y": 2,
-            "width": 4,
-            "height": 2
           }
         },
         {
@@ -2391,10 +2752,10 @@
             }
           },
           "position": {
-            "x": 0,
-            "y": 4,
+            "x": 3,
+            "y": 2,
             "width": 3,
-            "height": 3
+            "height": 2
           }
         },
         {
@@ -2438,7 +2799,7 @@
                   "fields": []
                 },
                 "description": {
-                  "value": "Registros processados por minuto",
+                  "value": "Registros por minuto",
                   "fields": []
                 }
               },
@@ -2474,10 +2835,10 @@
             }
           },
           "position": {
-            "x": 3,
-            "y": 4,
+            "x": 9,
+            "y": 2,
             "width": 3,
-            "height": 3
+            "height": 2
           }
         },
         {
@@ -2517,7 +2878,7 @@
                 "showTitle": true,
                 "showDescription": true,
                 "title": {
-                  "value": "Duração da run",
+                  "value": "Duração",
                   "fields": []
                 },
                 "description": {
@@ -2542,7 +2903,7 @@
                 "target": {
                   "fieldName": "baseline_duracao",
                   "period": {
-                    "offset": 1,
+                    "offset": 0,
                     "type": "relative-to-value-period"
                   }
                 },
@@ -2558,9 +2919,9 @@
           },
           "position": {
             "x": 6,
-            "y": 4,
+            "y": 2,
             "width": 3,
-            "height": 3
+            "height": 2
           }
         },
         {
@@ -2573,25 +2934,11 @@
                   "datasetName": "exe_kpis_periodo",
                   "fields": [
                     {
-                      "name": "run_period",
-                      "expression": "`run_period`"
-                    },
-                    {
-                      "name": "baseline_completude",
-                      "expression": "`baseline_completude`"
-                    },
-                    {
-                      "name": "execucoes_completas",
-                      "expression": "`execucoes_completas`"
+                      "name": "total_runs_analise",
+                      "expression": "`total_runs_analise`"
                     }
                   ],
-                  "disaggregated": true,
-                  "orders": [
-                    {
-                      "direction": "DESC",
-                      "expression": "`run_period`"
-                    }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -2600,38 +2947,19 @@
                 "showDescription": true,
                 "showTitle": true,
                 "title": {
-                  "fields": [],
-                  "value": "Completude"
+                  "value": "Execuções em análise",
+                  "fields": []
                 },
                 "description": {
                   "fields": [],
-                  "value": "Fontes por run"
+                  "value": "Total de runs"
                 }
               },
               "version": 2,
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "execucoes_completas",
-                  "format": {
-                    "abbreviation": "none",
-                    "decimalPlaces": {
-                      "places": 0,
-                      "type": "exact"
-                    },
-                    "type": "number-plain"
-                  }
-                },
-                "target": {
-                  "fieldName": "baseline_completude",
-                  "period": {
-                    "offset": 1,
-                    "type": "relative-to-value-period"
-                  }
-                },
-                "period": {
-                  "fieldName": "run_period",
-                  "hideLabels": true
+                  "fieldName": "total_runs_analise"
                 }
               },
               "data": {
@@ -2640,10 +2968,10 @@
             }
           },
           "position": {
-            "x": 9,
-            "y": 4,
+            "x": 0,
+            "y": 2,
             "width": 3,
-            "height": 3
+            "height": 2
           }
         },
         {
@@ -2673,7 +3001,7 @@
                 "showTitle": true,
                 "title": {
                   "fields": [],
-                  "value": "Tendência de duração por run"
+                  "value": "Duração por execução de pipeline (bronze/silver)"
                 }
               },
               "version": 3,
@@ -2713,7 +3041,7 @@
           },
           "position": {
             "x": 6,
-            "y": 14,
+            "y": 11,
             "width": 6,
             "height": 9
           }
@@ -2811,7 +3139,7 @@
           },
           "position": {
             "x": 0,
-            "y": 14,
+            "y": 11,
             "width": 6,
             "height": 9
           }
@@ -2821,8 +3149,8 @@
             "name": "header_status",
             "multilineTextboxSpec": {
               "lines": [
-                "## ✓ Pipeline operando dentro da normalidade\n",
-                "Comparação: última execução vs média dos últimos 7 dias"
+                "## Execução — pipeline bronze/silver\n",
+                "Comparação: última execução vs. média das 4 semanas anteriores"
               ]
             }
           },
@@ -3143,206 +3471,6 @@
             "y": 3,
             "width": 4,
             "height": 8
-          }
-        }
-      ],
-      "pageType": "PAGE_TYPE_CANVAS",
-      "layoutVersion": "GRID_V1"
-    },
-    {
-      "name": "ingestao",
-      "displayName": "Ingestão",
-      "layout": [
-        {
-          "widget": {
-            "name": "w15_data_recente",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "ing_data_recente",
-                  "fields": [
-                    {
-                      "name": "data_ingestao_recente",
-                      "expression": "`data_ingestao_recente`"
-                    }
-                  ],
-                  "disaggregated": true
-                }
-              }
-            ],
-            "spec": {
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Ingestão mais recente com sucesso",
-                  "fields": []
-                }
-              },
-              "version": 2,
-              "widgetType": "counter",
-              "encodings": {
-                "value": {
-                  "fieldName": "data_ingestao_recente"
-                }
-              },
-              "data": {
-                "queryName": "main_query"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 0,
-            "width": 12,
-            "height": 3
-          }
-        },
-        {
-          "widget": {
-            "name": "w16_freshness",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "ing_freshness",
-                  "fields": [
-                    {
-                      "name": "fonte",
-                      "expression": "`fonte`"
-                    },
-                    {
-                      "name": "ano",
-                      "expression": "`ano`"
-                    },
-                    {
-                      "name": "last_modified_cvm",
-                      "expression": "`last_modified_cvm`"
-                    },
-                    {
-                      "name": "ingest_ts",
-                      "expression": "`ingest_ts`"
-                    },
-                    {
-                      "name": "versao_ingestao",
-                      "expression": "`versao_ingestao`"
-                    },
-                    {
-                      "name": "status",
-                      "expression": "`status`"
-                    },
-                    {
-                      "name": "dias_desde_ingestao",
-                      "expression": "`dias_desde_ingestao`"
-                    }
-                  ],
-                  "disaggregated": true
-                }
-              }
-            ],
-            "spec": {
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Freshness por fonte e ano (dias desde ingestão)",
-                  "fields": []
-                }
-              },
-              "version": 2,
-              "widgetType": "table",
-              "encodings": {
-                "columns": [
-                  {
-                    "fieldName": "fonte"
-                  },
-                  {
-                    "fieldName": "ano"
-                  },
-                  {
-                    "fieldName": "last_modified_cvm"
-                  },
-                  {
-                    "fieldName": "ingest_ts"
-                  },
-                  {
-                    "fieldName": "versao_ingestao"
-                  },
-                  {
-                    "fieldName": "status"
-                  },
-                  {
-                    "fieldName": "dias_desde_ingestao"
-                  }
-                ]
-              },
-              "data": {
-                "queryName": "main_query"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 3,
-            "width": 8,
-            "height": 10
-          }
-        },
-        {
-          "widget": {
-            "name": "w17_bytes_ano",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "ing_bytes_ano",
-                  "fields": [
-                    {
-                      "name": "ano",
-                      "expression": "`ano`"
-                    },
-                    {
-                      "name": "total_bytes",
-                      "expression": "`total_bytes`"
-                    }
-                  ],
-                  "disaggregated": true
-                }
-              }
-            ],
-            "spec": {
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Volume por ano (bytes, última ingestão)",
-                  "fields": []
-                }
-              },
-              "version": 3,
-              "widgetType": "bar",
-              "encodings": {
-                "x": {
-                  "fieldName": "ano",
-                  "scale": {
-                    "type": "categorical"
-                  }
-                },
-                "y": {
-                  "fieldName": "total_bytes",
-                  "scale": {
-                    "type": "quantitative"
-                  }
-                }
-              },
-              "data": {
-                "queryName": "main_query"
-              }
-            }
-          },
-          "position": {
-            "x": 8,
-            "y": 3,
-            "width": 4,
-            "height": 10
           }
         }
       ],

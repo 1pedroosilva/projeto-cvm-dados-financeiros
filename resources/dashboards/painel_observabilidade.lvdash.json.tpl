@@ -316,25 +316,36 @@
       "schema": "{{SCHEMA_PREFIX}}_05_apoio"
     },
     {
-      "name": "orq_status_hero",
-      "displayName": "Status Hero Pipeline",
+      "name": "status_saude_pipeline",
+      "displayName": "Status Saúde Pipeline",
       "queryLines": [
-        "SELECT\n",
-        "  CASE\n",
-        "    WHEN result_state = 'SUCCEEDED' THEN '✓ SAUDAVEL'\n",
-        "    WHEN result_state IS NULL THEN '⏸ AGUARDANDO'\n",
-        "    ELSE '⚠ ATENCAO NECESSARIA'\n",
-        "  END AS status_visual,\n",
-        "  CONCAT('Ultima execucao: ', DATE_FORMAT(period_end_time, 'dd/MM as HH:mm'), ' - Duracao: ',\n",
-        "    CASE WHEN DATEDIFF(SECOND, period_start_time, period_end_time) >= 60\n",
-        "      THEN CONCAT(FLOOR(DATEDIFF(SECOND, period_start_time, period_end_time) / 60), 'min ', ROUND(DATEDIFF(SECOND, period_start_time, period_end_time) % 60), 's')\n",
-        "      ELSE CONCAT(ROUND(DATEDIFF(SECOND, period_start_time, period_end_time)), ' segundos')\n",
-        "    END) AS detalhes,\n",
-        "  result_state AS status_raw\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "WHERE COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
-        "ORDER BY COALESCE(period_end_time, ingested_at) DESC\n",
-        "LIMIT 1"
+        "WITH\n",
+        "falha_recente AS (\n",
+        "  SELECT COUNT(*) AS total\n",
+        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "  WHERE result_state != 'SUCCEEDED'\n",
+        "    AND period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "),\n",
+        "semanal_executou AS (\n",
+        "  SELECT COUNT(*) AS total\n",
+        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "  WHERE job_name = 'CVM - Pipeline Completo Semanal'\n",
+        "    AND result_state = 'SUCCEEDED'\n",
+        "    AND period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 8 DAYS\n",
+        "),\n",
+        "diario_executou AS (\n",
+        "  SELECT COUNT(*) AS total\n",
+        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "  WHERE job_name = 'CVM - Verificação Diária Landing Zone'\n",
+        "    AND result_state = 'SUCCEEDED'\n",
+        "    AND period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 26 HOURS\n",
+        ")\n",
+        "SELECT CASE\n",
+        "  WHEN (SELECT total FROM falha_recente) > 0     THEN 'ALERTA — falha em run recente'\n",
+        "  WHEN (SELECT total FROM semanal_executou) = 0  THEN 'ALERTA — pipeline semanal atrasado'\n",
+        "  WHEN (SELECT total FROM diario_executou) = 0   THEN 'ALERTA — verificação diária atrasada'\n",
+        "  ELSE '✓ SAUDÁVEL'\n",
+        "END AS status_pipeline"
       ]
     },
     {
@@ -933,11 +944,11 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "orq_status_hero",
+                  "datasetName": "status_saude_pipeline",
                   "fields": [
                     {
-                      "name": "status_visual",
-                      "expression": "`status_visual`"
+                      "name": "status_pipeline",
+                      "expression": "`status_pipeline`"
                     }
                   ],
                   "disaggregated": true
@@ -956,7 +967,7 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "status_visual"
+                  "fieldName": "status_pipeline"
                 }
               },
               "data": {
