@@ -252,13 +252,13 @@ def gravar_delta(df_bronze, ano, versao_atual):
 # registrar_controle: Registra status de processamento na tabela de controle
 # Permite rastreabilidade e detecção de períodos pendentes/falhos
 
-def registrar_controle_sucesso(ano, last_modified_cvm, versao_atual):
+def registrar_controle_sucesso(ano, last_modified_cvm, versao_atual, id_execucao):
     """
     Registra processamento bem-sucedido na tabela de controle.
     """
     spark.sql(f"""
         INSERT INTO {SCHEMA_APOIO}.controle_ingestao
-            (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
+            (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem, id_execucao)
         VALUES (
             'bpp',
             {ano},
@@ -267,18 +267,19 @@ def registrar_controle_sucesso(ano, last_modified_cvm, versao_atual):
             {versao_atual},
             current_timestamp(),
             'SUCCESS',
-            NULL
+            NULL,
+            '{id_execucao}'
         )
     """)
 
-def registrar_controle_falha(ano, erro):
+def registrar_controle_falha(ano, erro, id_execucao):
     """
     Registra falha de processamento na tabela de controle.
     """
     try:
         spark.sql(f"""
             INSERT INTO {SCHEMA_APOIO}.controle_ingestao
-                (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
+                (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem, id_execucao)
             VALUES (
                 'bpp',
                 {ano},
@@ -287,7 +288,8 @@ def registrar_controle_falha(ano, erro):
                 NULL,
                 current_timestamp(),
                 'FAILED',
-                '{str(erro).replace("'", "''")}'
+                '{str(erro).replace("'", "''")}',
+                '{id_execucao}'
             )
         """)
     except:
@@ -412,7 +414,7 @@ for ano in ANOS_PROCESSAR:
             )
         
         # 7. Registrar controle de sucesso
-        registrar_controle_sucesso(ano, last_modified_cvm, versao_atual)
+        registrar_controle_sucesso(ano, last_modified_cvm, versao_atual, id_execucao)
         
         duracao = time.time() - inicio
         anos_sucesso.append(ano)
@@ -449,7 +451,7 @@ for ano in ANOS_PROCESSAR:
         )
         
         # Registrar falha na tabela de controle
-        registrar_controle_falha(ano, e)
+        registrar_controle_falha(ano, e, id_execucao)
 
 # Relatório final
 logger.info(f"\n{'='*80}")

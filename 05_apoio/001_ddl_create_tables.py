@@ -244,7 +244,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA_APOIO}.controle_ingestao (
   ingest_ts TIMESTAMP COMMENT 'Timestamp da ingestão',
   status STRING COMMENT 'SUCCESS, FAILED',
   mensagem STRING COMMENT 'Mensagem de erro ou observações',
-  bytes_arquivo BIGINT COMMENT 'Tamanho do arquivo em bytes'
+  bytes_arquivo BIGINT COMMENT 'Tamanho do arquivo em bytes',
+  id_execucao STRING COMMENT 'FK para observabilidade_execucoes.id_execucao'
 ) USING DELTA
 COMMENT 'Controle de ingestão - rastreia cada ingestão fonte/ano e detecta atualizações CVM'
 """)

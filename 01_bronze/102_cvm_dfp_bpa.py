@@ -297,7 +297,7 @@ for ano in ANOS_PROCESSAR:
         # Registrar ingestão na tabela de controle
         spark.sql(f"""
             INSERT INTO {SCHEMA_APOIO}.controle_ingestao
-                (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
+                (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem, id_execucao)
             VALUES (
                 'bpa',
                 {ano},
@@ -306,7 +306,8 @@ for ano in ANOS_PROCESSAR:
                 {versao_atual},
                 current_timestamp(),
                 'SUCCESS',
-                NULL
+                NULL,
+                '{id_execucao}'
             )
         """)
 
@@ -348,7 +349,7 @@ for ano in ANOS_PROCESSAR:
         try:
             spark.sql(f"""
                 INSERT INTO {SCHEMA_APOIO}.controle_ingestao
-                    (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem)
+                    (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem, id_execucao)
                 VALUES (
                     'bpa',
                     {ano},
@@ -357,7 +358,8 @@ for ano in ANOS_PROCESSAR:
                     NULL,
                     current_timestamp(),
                     'FAILED',
-                    '{str(e).replace("'", "''")}'
+                    '{str(e).replace("'", "''")}',
+                    '{id_execucao}'
                 )
             """)
         except:

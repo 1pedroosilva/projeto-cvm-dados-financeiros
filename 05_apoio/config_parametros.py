@@ -553,6 +553,7 @@ def registrar_ingestao_landing(
     status: str = 'SUCCESS',
     mensagem: str = None,
     bytes_arquivo=None,
+    id_execucao: str = None,
 ):
     """INSERT centralizado em controle_ingestao.
 
@@ -568,6 +569,7 @@ def registrar_ingestao_landing(
         status: 'SUCCESS', 'SKIPPED', 'ERROR'
         mensagem: Mensagem de erro ou observação (opcional)
         bytes_arquivo: Tamanho do arquivo em bytes (opcional)
+        id_execucao: UUID da execução (FK para observabilidade_execucoes)
     """
     def _sql_str(val):
         if val is None:
@@ -578,7 +580,7 @@ def registrar_ingestao_landing(
         spark.sql(f"""
             INSERT INTO {CATALOG_NAME}.{SCHEMA_APOIO}.controle_ingestao
                 (fonte, ano, arquivo, last_modified_cvm, versao_ingestao,
-                 ingest_ts, status, mensagem, bytes_arquivo)
+                 ingest_ts, status, mensagem, bytes_arquivo, id_execucao)
             VALUES (
                 {_sql_str(fonte)},
                 {ano},
@@ -588,7 +590,8 @@ def registrar_ingestao_landing(
                 current_timestamp(),
                 {_sql_str(status)},
                 {_sql_str(mensagem)},
-                {bytes_arquivo if bytes_arquivo is not None else 'NULL'}
+                {bytes_arquivo if bytes_arquivo is not None else 'NULL'},
+                {_sql_str(id_execucao)}
             )
         """)
     except Exception as e:

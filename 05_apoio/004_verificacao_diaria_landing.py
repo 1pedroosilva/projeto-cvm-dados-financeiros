@@ -68,6 +68,9 @@ from datetime import datetime
 # Loop principal: verificar CVM, arquivar versão atual e baixar novas versões
 # Arquiva em {ano}/archive/ antes de sobrescrever, preservando histórico de versões
 
+import uuid
+id_execucao = str(uuid.uuid4())
+
 print("=" * 80)
 print("VERIFICAÇÃO DIÁRIA - LANDING ZONE CVM")
 print("=" * 80)
@@ -106,7 +109,8 @@ for ano in ANOS_PROCESSAR:
             ano=ano,
             arquivo=f'dfp_cia_aberta_{ano}.zip',
             status='ERROR',
-            mensagem=f"HTTP {e.code}"
+            mensagem=f"HTTP {e.code}",
+            id_execucao=id_execucao
         )
         continue
     except Exception as e:
@@ -117,7 +121,8 @@ for ano in ANOS_PROCESSAR:
             ano=ano,
             arquivo=f'dfp_cia_aberta_{ano}.zip',
             status='ERROR',
-            mensagem=str(e)[:2000]
+            mensagem=str(e)[:2000],
+            id_execucao=id_execucao
         )
         continue
 
@@ -195,7 +200,8 @@ for ano in ANOS_PROCESSAR:
             arquivo=f'dfp_cia_aberta_{ano}.zip',
             last_modified_cvm=last_modified_dt.isoformat(),
             status='SUCCESS',
-            bytes_arquivo=len(zip_bytes)
+            bytes_arquivo=len(zip_bytes),
+            id_execucao=id_execucao
         )
     else:
         arquivos_ignorados.append(ano)
@@ -206,7 +212,8 @@ for ano in ANOS_PROCESSAR:
             ano=ano,
             arquivo=f'dfp_cia_aberta_{ano}.zip',
             last_modified_cvm=last_modified_dt.isoformat(),
-            status='SKIPPED'
+            status='SKIPPED',
+            id_execucao=id_execucao
         )
 
 print(f"\n{'=' * 80}")
@@ -322,9 +329,6 @@ else:
 # Calcular duração
 _fim_execucao = datetime.now()
 _duracao = (_fim_execucao - _inicio_execucao).total_seconds()
-
-# Gerar ID único da execução
-id_execucao = str(uuid.uuid4())
 
 # Registrar execução na tabela de observabilidade (função centralizada)
 registrar_observabilidade_execucao(
