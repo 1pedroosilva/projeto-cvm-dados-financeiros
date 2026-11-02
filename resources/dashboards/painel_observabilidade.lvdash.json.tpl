@@ -17,7 +17,7 @@
         "  encontrado,\n",
         "  registros_afetados,\n",
         "  detalhes,\n",
-        "  ts_check\n",
+        "  from_utc_timestamp(ts_check, 'America/Sao_Paulo') AS ts_check\n",
         "FROM\n",
         "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_guardrails\n",
         "ORDER BY\n",
@@ -28,9 +28,12 @@
       "name": "obs_execucoes",
       "displayName": "Observabilidade Execuções",
       "queryLines": [
-        "SELECT *\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes\n",
-        "ORDER BY created_at DESC"
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes\n",
+        "ORDER BY\n",
+        "  created_at DESC"
       ]
     },
     {
@@ -59,11 +62,19 @@
       "queryLines": [
         "SELECT\n",
         "  job_name AS Pipeline,\n",
-        "  DATE_FORMAT(period_end_time, 'dd/MM/yyyy HH:mm') AS `Concluido em`,\n",
-        "  CASE WHEN DATEDIFF(SECOND, period_start_time, period_end_time) >= 60\n",
-        "    THEN CONCAT(FLOOR(DATEDIFF(SECOND, period_start_time, period_end_time) / 60), 'min ', ROUND(DATEDIFF(SECOND, period_start_time, period_end_time) % 60), 's')\n",
+        "  DATE_FORMAT(from_utc_timestamp(period_end_time, 'America/Sao_Paulo'), 'dd/MM/yyyy HH:mm') AS `Concluído em`,\n",
+        "  CASE\n",
+        "    WHEN\n",
+        "      DATEDIFF(SECOND, period_start_time, period_end_time) >= 60\n",
+        "    THEN\n",
+        "      CONCAT(\n",
+        "        FLOOR(DATEDIFF(SECOND, period_start_time, period_end_time) / 60),\n",
+        "        'min ',\n",
+        "        ROUND(DATEDIFF(SECOND, period_start_time, period_end_time) % 60),\n",
+        "        's'\n",
+        "      )\n",
         "    ELSE CONCAT(ROUND(DATEDIFF(SECOND, period_start_time, period_end_time)), ' seg')\n",
-        "  END AS `Tempo de Execucao`,\n",
+        "  END AS `Tempo de Execução`,\n",
         "  CASE\n",
         "    WHEN result_state = 'SUCCEEDED' THEN '✅ Sucesso'\n",
         "    WHEN result_state = 'FAILED' THEN '❌ Falhou'\n",
@@ -71,8 +82,10 @@
         "    WHEN result_state = 'ERROR' THEN '❌ Erro'\n",
         "    ELSE result_state\n",
         "  END AS Resultado\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "ORDER BY COALESCE(period_end_time, ingested_at) DESC\n",
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "ORDER BY\n",
+        "  COALESCE(period_end_time, ingested_at) DESC\n",
         "LIMIT 1"
       ],
       "catalog": "workspace",
@@ -84,10 +97,38 @@
       "queryLines": [
         "SELECT\n",
         "  ROUND(AVG(DATEDIFF(SECOND, period_start_time, period_end_time)) / 60.0, 1) AS duracao_minutos\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "WHERE COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "WHERE\n",
+        "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
         "  AND period_start_time IS NOT NULL\n",
-        "  AND period_end_time IS NOT NULL"
+        "  AND period_end_time IS NOT NULL\n",
+        "  AND (:ambiente IS NULL OR array_contains(:ambiente, INITCAP(ambiente)))\n",
+        "  AND (:tipo_execucao IS NULL OR array_contains(:tipo_execucao, CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automático' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END))"
+      ],
+      "parameters": [
+        {
+          "displayName": "Ambiente",
+          "keyword": "ambiente",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        },
+        {
+          "displayName": "Tipo de Execução",
+          "keyword": "tipo_execucao",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        }
       ],
       "catalog": "workspace",
       "schema": "{{SCHEMA_PREFIX}}_05_apoio"
@@ -97,9 +138,47 @@
       "displayName": "Taxa de Sucesso (7 dias)",
       "queryLines": [
         "SELECT\n",
-        "  ROUND(SUM(CASE WHEN result_state = 'SUCCEEDED' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 1) AS taxa_sucesso_pct\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "WHERE COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS"
+        "  ROUND(\n",
+        "    SUM(\n",
+        "      CASE\n",
+        "        WHEN result_state = 'SUCCEEDED' THEN 1\n",
+        "        ELSE 0\n",
+        "      END\n",
+        "    )\n",
+        "      * 100.0\n",
+        "      / NULLIF(COUNT(*), 0),\n",
+        "    1\n",
+        "  ) AS taxa_sucesso_pct\n",
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "WHERE\n",
+        "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  AND (:ambiente IS NULL OR array_contains(:ambiente, INITCAP(ambiente)))\n",
+        "  AND (:tipo_execucao IS NULL OR array_contains(:tipo_execucao, CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automático' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END))"
+      ],
+      "parameters": [
+        {
+          "displayName": "Ambiente",
+          "keyword": "ambiente",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        },
+        {
+          "displayName": "Tipo de Execução",
+          "keyword": "tipo_execucao",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        }
       ],
       "catalog": "workspace",
       "schema": "{{SCHEMA_PREFIX}}_05_apoio"
@@ -109,22 +188,70 @@
       "displayName": "Breakdown Tempo por Etapa (7 dias)",
       "queryLines": [
         "SELECT\n",
-        "  CASE WHEN task_key = 'check_landing_zone' THEN 'Verificacao Landing Zone'\n",
+        "  CASE\n",
+        "    WHEN task_key = 'check_landing_zone' THEN 'Verificação Landing Zone'\n",
         "    WHEN task_key = 'bronze_bpa' THEN 'Bronze - BPA'\n",
         "    WHEN task_key = 'bronze_bpp' THEN 'Bronze - BPP'\n",
         "    WHEN task_key = 'bronze_dre' THEN 'Bronze - DRE'\n",
         "    WHEN task_key = 'silver_bpa' THEN 'Silver - BPA'\n",
         "    WHEN task_key = 'silver_bpp' THEN 'Silver - BPP'\n",
         "    WHEN task_key = 'silver_dre' THEN 'Silver - DRE'\n",
-        "    WHEN task_key = 'verificacao_landing' THEN 'Verificacao Diaria'\n",
-        "    ELSE task_key END AS Etapa,\n",
-        "  ROUND(AVG(duracao_segundos) / 60.0, 1) AS duracao_minutos,\n",
+        "    WHEN task_key = 'verificacao_landing' THEN 'Verificação Diária'\n",
+        "    WHEN task_key = 'ddl_create_tables' THEN 'Preparação de Tabelas'\n",
+        "    WHEN task_key = 'transposicao_system' THEN 'Transposição Sistema'\n",
+        "    ELSE task_key\n",
+        "  END AS Etapa,\n",
+        "  ROUND(AVG(COALESCE(duracao_segundos, task_duracao_segundos)) / 60.0, 1) AS duracao_minutos,\n",
         "  'Pipeline Completo' AS barra\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
-        "WHERE COALESCE(period_end_time, execucao_created_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
-        "  AND duracao_segundos IS NOT NULL AND task_key IS NOT NULL\n",
-        "GROUP BY task_key\n",
-        "ORDER BY duracao_minutos DESC"
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
+        "WHERE\n",
+        "  COALESCE(period_end_time, execucao_created_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  AND COALESCE(duracao_segundos, task_duracao_segundos) IS NOT NULL\n",
+        "  AND task_key IS NOT NULL\n",
+        "  AND (\n",
+        "    :ambiente IS NULL\n",
+        "    OR array_contains(:ambiente, INITCAP(ambiente))\n",
+        "  )\n",
+        "  AND (\n",
+        "    :tipo_execucao IS NULL\n",
+        "    OR array_contains(\n",
+        "      :tipo_execucao,\n",
+        "      CASE\n",
+        "        WHEN LOWER(trigger_type) = 'cron' THEN 'Automático'\n",
+        "        WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual'\n",
+        "        ELSE trigger_type\n",
+        "      END\n",
+        "    )\n",
+        "  )\n",
+        "GROUP BY\n",
+        "  task_key\n",
+        "ORDER BY\n",
+        "  duracao_minutos DESC"
+      ],
+      "parameters": [
+        {
+          "displayName": "Ambiente",
+          "keyword": "ambiente",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        },
+        {
+          "displayName": "Tipo de Execução",
+          "keyword": "tipo_execucao",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        }
       ],
       "catalog": "workspace",
       "schema": "{{SCHEMA_PREFIX}}_05_apoio"
@@ -133,12 +260,30 @@
       "name": "exe_total_registros",
       "displayName": "Total Registros Última Run",
       "queryLines": [
-        "SELECT COALESCE(SUM(registros_processados), 0) AS total_registros\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
-        "WHERE run_id = (\n",
-        "  SELECT run_id FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "  WHERE run_id IN (SELECT DISTINCT run_id FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes WHERE run_id IS NOT NULL)\n",
-        "  ORDER BY COALESCE(period_end_time, ingested_at) DESC LIMIT 1)"
+        "SELECT\n",
+        "  COALESCE(SUM(registros_processados), 0) AS total_registros\n",
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
+        "WHERE\n",
+        "  run_id\n",
+        "    = (\n",
+        "      SELECT\n",
+        "        run_id\n",
+        "      FROM\n",
+        "        workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "      WHERE\n",
+        "        run_id IN (\n",
+        "          SELECT DISTINCT\n",
+        "            run_id\n",
+        "          FROM\n",
+        "            workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes\n",
+        "          WHERE\n",
+        "            run_id IS NOT NULL\n",
+        "        )\n",
+        "      ORDER BY\n",
+        "        COALESCE(period_end_time, ingested_at) DESC\n",
+        "      LIMIT 1\n",
+        "    )"
       ],
       "catalog": "workspace",
       "schema": "{{SCHEMA_PREFIX}}_05_apoio"
@@ -147,24 +292,111 @@
       "name": "exe_cobertura",
       "displayName": "Cobertura Pipeline",
       "queryLines": [
-        "SELECT fonte,\n",
-        "  MAX(CASE WHEN ano = 2021 THEN\n",
-        "    CASE task_result_state WHEN 'SUCCEEDED' THEN '✅' WHEN 'FAILED' THEN '❌' WHEN 'ERROR' THEN '❌' WHEN 'CANCELLED' THEN '⚠️' ELSE '—' END\n",
-        "  END) AS `2021`,   MAX(CASE WHEN ano = 2022 THEN\n",
-        "    CASE task_result_state WHEN 'SUCCEEDED' THEN '✅' WHEN 'FAILED' THEN '❌' WHEN 'ERROR' THEN '❌' WHEN 'CANCELLED' THEN '⚠️' ELSE '—' END\n",
-        "  END) AS `2022`,   MAX(CASE WHEN ano = 2023 THEN\n",
-        "    CASE task_result_state WHEN 'SUCCEEDED' THEN '✅' WHEN 'FAILED' THEN '❌' WHEN 'ERROR' THEN '❌' WHEN 'CANCELLED' THEN '⚠️' ELSE '—' END\n",
-        "  END) AS `2023`,   MAX(CASE WHEN ano = 2024 THEN\n",
-        "    CASE task_result_state WHEN 'SUCCEEDED' THEN '✅' WHEN 'FAILED' THEN '❌' WHEN 'ERROR' THEN '❌' WHEN 'CANCELLED' THEN '⚠️' ELSE '—' END\n",
-        "  END) AS `2024`,   MAX(CASE WHEN ano = 2025 THEN\n",
-        "    CASE task_result_state WHEN 'SUCCEEDED' THEN '✅' WHEN 'FAILED' THEN '❌' WHEN 'ERROR' THEN '❌' WHEN 'CANCELLED' THEN '⚠️' ELSE '—' END\n",
-        "  END) AS `2025`,   MAX(CASE WHEN ano = 2026 THEN\n",
-        "    CASE task_result_state WHEN 'SUCCEEDED' THEN '✅' WHEN 'FAILED' THEN '❌' WHEN 'ERROR' THEN '❌' WHEN 'CANCELLED' THEN '⚠️' ELSE '—' END\n",
-        "  END) AS `2026`\n",
-        "FROM (SELECT fonte, ano, task_result_state,\n",
-        "    ROW_NUMBER() OVER (PARTITION BY fonte, ano ORDER BY period_end_time DESC) AS rn\n",
-        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada WHERE fonte IS NOT NULL AND ano IS NOT NULL) sub\n",
-        "WHERE rn = 1 GROUP BY fonte ORDER BY fonte"
+        "SELECT\n",
+        "  fonte,\n",
+        "  MAX(\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        ano = 2021\n",
+        "      THEN\n",
+        "        CASE task_result_state\n",
+        "          WHEN 'SUCCEEDED' THEN '✅'\n",
+        "          WHEN 'FAILED' THEN '❌'\n",
+        "          WHEN 'ERROR' THEN '❌'\n",
+        "          WHEN 'CANCELLED' THEN '⚠️'\n",
+        "          ELSE '—'\n",
+        "        END\n",
+        "    END\n",
+        "  ) AS `2021`,\n",
+        "  MAX(\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        ano = 2022\n",
+        "      THEN\n",
+        "        CASE task_result_state\n",
+        "          WHEN 'SUCCEEDED' THEN '✅'\n",
+        "          WHEN 'FAILED' THEN '❌'\n",
+        "          WHEN 'ERROR' THEN '❌'\n",
+        "          WHEN 'CANCELLED' THEN '⚠️'\n",
+        "          ELSE '—'\n",
+        "        END\n",
+        "    END\n",
+        "  ) AS `2022`,\n",
+        "  MAX(\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        ano = 2023\n",
+        "      THEN\n",
+        "        CASE task_result_state\n",
+        "          WHEN 'SUCCEEDED' THEN '✅'\n",
+        "          WHEN 'FAILED' THEN '❌'\n",
+        "          WHEN 'ERROR' THEN '❌'\n",
+        "          WHEN 'CANCELLED' THEN '⚠️'\n",
+        "          ELSE '—'\n",
+        "        END\n",
+        "    END\n",
+        "  ) AS `2023`,\n",
+        "  MAX(\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        ano = 2024\n",
+        "      THEN\n",
+        "        CASE task_result_state\n",
+        "          WHEN 'SUCCEEDED' THEN '✅'\n",
+        "          WHEN 'FAILED' THEN '❌'\n",
+        "          WHEN 'ERROR' THEN '❌'\n",
+        "          WHEN 'CANCELLED' THEN '⚠️'\n",
+        "          ELSE '—'\n",
+        "        END\n",
+        "    END\n",
+        "  ) AS `2024`,\n",
+        "  MAX(\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        ano = 2025\n",
+        "      THEN\n",
+        "        CASE task_result_state\n",
+        "          WHEN 'SUCCEEDED' THEN '✅'\n",
+        "          WHEN 'FAILED' THEN '❌'\n",
+        "          WHEN 'ERROR' THEN '❌'\n",
+        "          WHEN 'CANCELLED' THEN '⚠️'\n",
+        "          ELSE '—'\n",
+        "        END\n",
+        "    END\n",
+        "  ) AS `2025`,\n",
+        "  MAX(\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        ano = 2026\n",
+        "      THEN\n",
+        "        CASE task_result_state\n",
+        "          WHEN 'SUCCEEDED' THEN '✅'\n",
+        "          WHEN 'FAILED' THEN '❌'\n",
+        "          WHEN 'ERROR' THEN '❌'\n",
+        "          WHEN 'CANCELLED' THEN '⚠️'\n",
+        "          ELSE '—'\n",
+        "        END\n",
+        "    END\n",
+        "  ) AS `2026`\n",
+        "FROM\n",
+        "  (\n",
+        "    SELECT\n",
+        "      fonte,\n",
+        "      ano,\n",
+        "      task_result_state,\n",
+        "      ROW_NUMBER() OVER (PARTITION BY fonte, ano ORDER BY period_end_time DESC) AS rn\n",
+        "    FROM\n",
+        "      workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
+        "    WHERE\n",
+        "      fonte IS NOT NULL\n",
+        "      AND ano IS NOT NULL\n",
+        "  ) sub\n",
+        "WHERE\n",
+        "  rn = 1\n",
+        "GROUP BY\n",
+        "  fonte\n",
+        "ORDER BY\n",
+        "  fonte"
       ],
       "catalog": "workspace",
       "schema": "{{SCHEMA_PREFIX}}_05_apoio"
@@ -188,14 +420,37 @@
       "name": "qual_checks_ultima_run",
       "displayName": "Checks Última Run",
       "queryLines": [
-        "SELECT COUNT(*) AS total_checks\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_guardrails g\n",
-        "WHERE g.id_execucao IN (\n",
-        "  SELECT e.id_execucao FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes e\n",
-        "  WHERE e.run_id = (\n",
-        "    SELECT r.run_id FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs r\n",
-        "    WHERE r.run_id IN (SELECT DISTINCT run_id FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes WHERE run_id IS NOT NULL)\n",
-        "    ORDER BY COALESCE(r.period_end_time, r.ingested_at) DESC LIMIT 1))"
+        "SELECT\n",
+        "  COUNT(*) AS total_checks\n",
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_guardrails g\n",
+        "WHERE\n",
+        "  g.id_execucao IN (\n",
+        "    SELECT\n",
+        "      e.id_execucao\n",
+        "    FROM\n",
+        "      workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes e\n",
+        "    WHERE\n",
+        "      e.run_id\n",
+        "        = (\n",
+        "          SELECT\n",
+        "            r.run_id\n",
+        "          FROM\n",
+        "            workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs r\n",
+        "          WHERE\n",
+        "            r.run_id IN (\n",
+        "              SELECT DISTINCT\n",
+        "                run_id\n",
+        "              FROM\n",
+        "                workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes\n",
+        "              WHERE\n",
+        "                run_id IS NOT NULL\n",
+        "            )\n",
+        "          ORDER BY\n",
+        "            COALESCE(r.period_end_time, r.ingested_at) DESC\n",
+        "          LIMIT 1\n",
+        "        )\n",
+        "  )"
       ],
       "catalog": "workspace",
       "schema": "{{SCHEMA_PREFIX}}_05_apoio"
@@ -204,14 +459,47 @@
       "name": "qual_pass_rate",
       "displayName": "Taxa PASS",
       "queryLines": [
-        "SELECT ROUND(SUM(CASE WHEN resultado = 'PASS' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0), 1) AS taxa_pass_pct\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_guardrails g\n",
-        "WHERE g.id_execucao IN (\n",
-        "  SELECT e.id_execucao FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes e\n",
-        "  WHERE e.run_id = (\n",
-        "    SELECT r.run_id FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs r\n",
-        "    WHERE r.run_id IN (SELECT DISTINCT run_id FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes WHERE run_id IS NOT NULL)\n",
-        "    ORDER BY COALESCE(r.period_end_time, r.ingested_at) DESC LIMIT 1))"
+        "SELECT\n",
+        "  ROUND(\n",
+        "    SUM(\n",
+        "      CASE\n",
+        "        WHEN resultado = 'PASS' THEN 1\n",
+        "        ELSE 0\n",
+        "      END\n",
+        "    )\n",
+        "      * 100.0\n",
+        "      / NULLIF(COUNT(*), 0),\n",
+        "    1\n",
+        "  ) AS taxa_pass_pct\n",
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_guardrails g\n",
+        "WHERE\n",
+        "  g.id_execucao IN (\n",
+        "    SELECT\n",
+        "      e.id_execucao\n",
+        "    FROM\n",
+        "      workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes e\n",
+        "    WHERE\n",
+        "      e.run_id\n",
+        "        = (\n",
+        "          SELECT\n",
+        "            r.run_id\n",
+        "          FROM\n",
+        "            workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs r\n",
+        "          WHERE\n",
+        "            r.run_id IN (\n",
+        "              SELECT DISTINCT\n",
+        "                run_id\n",
+        "              FROM\n",
+        "                workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes\n",
+        "              WHERE\n",
+        "                run_id IS NOT NULL\n",
+        "            )\n",
+        "          ORDER BY\n",
+        "            COALESCE(r.period_end_time, r.ingested_at) DESC\n",
+        "          LIMIT 1\n",
+        "        )\n",
+        "  )"
       ],
       "catalog": "workspace",
       "schema": "{{SCHEMA_PREFIX}}_05_apoio"
@@ -240,112 +528,93 @@
       "schema": "{{SCHEMA_PREFIX}}_05_apoio"
     },
     {
-      "name": "ing_data_recente",
-      "displayName": "Ingestão Mais Recente",
-      "queryLines": [
-        "SELECT\n",
-        "  MAX(ingest_ts) AS data_ingestao_recente\n",
-        "FROM\n",
-        "  controle_ingestao\n",
-        "WHERE\n",
-        "  status = 'SUCCESS'"
-      ],
-      "catalog": "workspace",
-      "schema": "{{SCHEMA_PREFIX}}_05_apoio"
-    },
-    {
-      "name": "ing_freshness",
-      "displayName": "Freshness por Fonte/Ano",
-      "queryLines": [
-        "SELECT\n",
-        "  fonte,\n",
-        "  ano,\n",
-        "  last_modified_cvm,\n",
-        "  ingest_ts,\n",
-        "  versao_ingestao,\n",
-        "  status,\n",
-        "  DATEDIFF(CURRENT_DATE(), DATE(ingest_ts)) AS dias_desde_ingestao\n",
-        "FROM\n",
-        "  (\n",
-        "    SELECT\n",
-        "      fonte,\n",
-        "      ano,\n",
-        "      last_modified_cvm,\n",
-        "      ingest_ts,\n",
-        "      versao_ingestao,\n",
-        "      status,\n",
-        "      ROW_NUMBER() OVER (PARTITION BY fonte, ano ORDER BY ingest_ts DESC) AS rn\n",
-        "    FROM\n",
-        "      controle_ingestao\n",
-        "  )\n",
-        "WHERE\n",
-        "  rn = 1\n",
-        "ORDER BY\n",
-        "  dias_desde_ingestao DESC"
-      ],
-      "catalog": "workspace",
-      "schema": "{{SCHEMA_PREFIX}}_05_apoio"
-    },
-    {
-      "name": "ing_bytes_ano",
-      "displayName": "Bytes por Ano",
-      "queryLines": [
-        "SELECT\n",
-        "  ano,\n",
-        "  SUM(bytes_arquivo) AS total_bytes\n",
-        "FROM\n",
-        "  (\n",
-        "    SELECT\n",
-        "      fonte,\n",
-        "      ano,\n",
-        "      bytes_arquivo,\n",
-        "      ROW_NUMBER() OVER (PARTITION BY fonte, ano ORDER BY ingest_ts DESC) AS rn\n",
-        "    FROM\n",
-        "      controle_ingestao\n",
-        "    WHERE\n",
-        "      bytes_arquivo IS NOT NULL\n",
-        "  ) sub\n",
-        "WHERE\n",
-        "  rn = 1\n",
-        "GROUP BY\n",
-        "  ano\n",
-        "ORDER BY\n",
-        "  ano"
-      ],
-      "catalog": "workspace",
-      "schema": "{{SCHEMA_PREFIX}}_05_apoio"
-    },
-    {
-      "name": "status_saude_pipeline",
+      "name": "orq_status_hero",
       "displayName": "Status Saúde Pipeline",
       "queryLines": [
-        "WITH\n",
-        "falha_recente AS (\n",
-        "  SELECT COUNT(*) AS total\n",
-        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "  WHERE result_state != 'SUCCEEDED'\n",
+        "WITH falha_recente AS (\n",
+        "  SELECT\n",
+        "    COUNT(*) AS total\n",
+        "  FROM\n",
+        "    workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "  WHERE\n",
+        "    result_state != 'SUCCEEDED'\n",
         "    AND period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
         "),\n",
         "semanal_executou AS (\n",
-        "  SELECT COUNT(*) AS total\n",
-        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "  WHERE job_name = 'CVM - Pipeline Completo Semanal'\n",
+        "  SELECT\n",
+        "    COUNT(*) AS total\n",
+        "  FROM\n",
+        "    workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "  WHERE\n",
+        "    job_name LIKE '%CVM - Pipeline Completo Semanal'\n",
         "    AND result_state = 'SUCCEEDED'\n",
         "    AND period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 8 DAYS\n",
         "),\n",
         "diario_executou AS (\n",
-        "  SELECT COUNT(*) AS total\n",
-        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "  WHERE job_name = 'CVM - Verificação Diária Landing Zone'\n",
+        "  SELECT\n",
+        "    COUNT(*) AS total\n",
+        "  FROM\n",
+        "    workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "  WHERE\n",
+        "    job_name LIKE '%CVM - Verificação Diária Landing Zone'\n",
         "    AND result_state = 'SUCCEEDED'\n",
         "    AND period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 26 HOURS\n",
         ")\n",
-        "SELECT CASE\n",
-        "  WHEN (SELECT total FROM falha_recente) > 0     THEN 'ALERTA — falha em run recente'\n",
-        "  WHEN (SELECT total FROM semanal_executou) = 0  THEN 'ALERTA — pipeline semanal atrasado'\n",
-        "  WHEN (SELECT total FROM diario_executou) = 0   THEN 'ALERTA — verificação diária atrasada'\n",
-        "  ELSE '✓ SAUDÁVEL'\n",
-        "END AS status_pipeline"
+        "SELECT\n",
+        "  CASE\n",
+        "    WHEN\n",
+        "      (\n",
+        "        SELECT\n",
+        "          total\n",
+        "        FROM\n",
+        "          falha_recente\n",
+        "      ) > 0\n",
+        "    THEN\n",
+        "      'ALERTA — falha em run recente'\n",
+        "    WHEN\n",
+        "      (\n",
+        "        SELECT\n",
+        "          total\n",
+        "        FROM\n",
+        "          semanal_executou\n",
+        "      ) = 0\n",
+        "    THEN\n",
+        "      'ALERTA — pipeline semanal atrasado'\n",
+        "    WHEN\n",
+        "      (\n",
+        "        SELECT\n",
+        "          total\n",
+        "        FROM\n",
+        "          diario_executou\n",
+        "      ) = 0\n",
+        "    THEN\n",
+        "      'ALERTA — verificação diária atrasada'\n",
+        "    ELSE '✓ SAUDÁVEL'\n",
+        "  END AS status_pipeline"
+      ],
+      "parameters": [
+        {
+          "displayName": "Ambiente",
+          "keyword": "ambiente",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        },
+        {
+          "displayName": "Tipo de Execução",
+          "keyword": "tipo_execucao",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        }
       ]
     },
     {
@@ -353,14 +622,56 @@
       "displayName": "Histórico Duração Diária (7 dias)",
       "queryLines": [
         "SELECT\n",
-        "  DATE_FORMAT(period_end_time, 'dd/MM HH:mm') AS Data,\n",
+        "  DATE_FORMAT(from_utc_timestamp(period_end_time, 'America/Sao_Paulo'), 'dd/MM HH:mm') AS Data,\n",
         "  ROUND(DATEDIFF(SECOND, period_start_time, period_end_time) / 60.0, 1) AS duracao_minutos,\n",
         "  run_id\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "WHERE period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "WHERE\n",
+        "  period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
         "  AND period_start_time IS NOT NULL\n",
         "  AND period_end_time IS NOT NULL\n",
-        "ORDER BY period_end_time ASC"
+        "  AND (\n",
+        "    :ambiente IS NULL\n",
+        "    OR array_contains(:ambiente, INITCAP(ambiente))\n",
+        "  )\n",
+        "  AND (\n",
+        "    :tipo_execucao IS NULL\n",
+        "    OR array_contains(\n",
+        "      :tipo_execucao,\n",
+        "      CASE\n",
+        "        WHEN LOWER(trigger_type) = 'cron' THEN 'Automático'\n",
+        "        WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual'\n",
+        "        ELSE trigger_type\n",
+        "      END\n",
+        "    )\n",
+        "  )\n",
+        "ORDER BY\n",
+        "  period_end_time ASC"
+      ],
+      "parameters": [
+        {
+          "displayName": "Ambiente",
+          "keyword": "ambiente",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        },
+        {
+          "displayName": "Tipo de Execução",
+          "keyword": "tipo_execucao",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        }
       ]
     },
     {
@@ -369,27 +680,92 @@
       "queryLines": [
         "SELECT\n",
         "  job_name AS Pipeline,\n",
-        "  DATE_FORMAT(period_end_time, 'dd/MM/yyyy HH:mm') AS `Concluido em`,\n",
-        "  CASE WHEN DATEDIFF(SECOND, period_start_time, period_end_time) >= 60\n",
-        "    THEN CONCAT(FLOOR(DATEDIFF(SECOND, period_start_time, period_end_time) / 60), 'min ', ROUND(DATEDIFF(SECOND, period_start_time, period_end_time) % 60), 's')\n",
+        "  DATE_FORMAT(from_utc_timestamp(period_end_time, 'America/Sao_Paulo'), 'dd/MM/yyyy HH:mm') AS `Concluído em`,\n",
+        "  CASE\n",
+        "    WHEN\n",
+        "      DATEDIFF(SECOND, period_start_time, period_end_time) >= 60\n",
+        "    THEN\n",
+        "      CONCAT(\n",
+        "        FLOOR(DATEDIFF(SECOND, period_start_time, period_end_time) / 60),\n",
+        "        'min ',\n",
+        "        ROUND(DATEDIFF(SECOND, period_start_time, period_end_time) % 60),\n",
+        "        's'\n",
+        "      )\n",
         "    ELSE CONCAT(ROUND(DATEDIFF(SECOND, period_start_time, period_end_time)), ' seg')\n",
-        "  END AS `Tempo de Execucao`,\n",
+        "  END AS `Tempo de Execução`,\n",
         "  INITCAP(ambiente) AS Ambiente,\n",
-        "  CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automatico' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END AS `Tipo de Execucao`,\n",
-        "  CASE WHEN result_state = 'SUCCEEDED' THEN 'Sucesso' WHEN result_state = 'FAILED' THEN 'Falhou' WHEN result_state = 'CANCELLED' THEN 'Cancelado' WHEN result_state = 'ERROR' THEN 'Erro' ELSE result_state END AS Resultado\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "WHERE COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
-        "ORDER BY COALESCE(period_end_time, ingested_at) DESC"
+        "  CASE\n",
+        "    WHEN LOWER(trigger_type) = 'cron' THEN 'Automático'\n",
+        "    WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual'\n",
+        "    ELSE trigger_type\n",
+        "  END AS `Tipo de Execução`,\n",
+        "  CASE\n",
+        "    WHEN result_state = 'SUCCEEDED' THEN 'Sucesso'\n",
+        "    WHEN result_state = 'FAILED' THEN 'Falhou'\n",
+        "    WHEN result_state = 'CANCELADO' THEN 'Cancelado'\n",
+        "    WHEN result_state = 'ERROR' THEN 'Erro'\n",
+        "    ELSE result_state\n",
+        "  END AS Resultado\n",
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "WHERE\n",
+        "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  AND (\n",
+        "    :ambiente IS NULL\n",
+        "    OR array_contains(:ambiente, INITCAP(ambiente))\n",
+        "  )\n",
+        "  AND (\n",
+        "    :tipo_execucao IS NULL\n",
+        "    OR array_contains(\n",
+        "      :tipo_execucao,\n",
+        "      CASE\n",
+        "        WHEN LOWER(trigger_type) = 'cron' THEN 'Automático'\n",
+        "        WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual'\n",
+        "        ELSE trigger_type\n",
+        "      END\n",
+        "    )\n",
+        "  )\n",
+        "ORDER BY\n",
+        "  COALESCE(period_end_time, ingested_at) DESC"
+      ],
+      "parameters": [
+        {
+          "displayName": "Ambiente",
+          "keyword": "ambiente",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        },
+        {
+          "displayName": "Tipo de Execução",
+          "keyword": "tipo_execucao",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        }
       ]
     },
     {
       "name": "filtro_ambiente",
       "displayName": "Filtro: Ambiente",
       "queryLines": [
-        "SELECT DISTINCT INITCAP(ambiente) AS Ambiente\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "WHERE COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS AND ambiente IS NOT NULL\n",
-        "ORDER BY Ambiente"
+        "SELECT DISTINCT\n",
+        "  INITCAP(ambiente) AS Ambiente\n",
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "WHERE\n",
+        "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "  AND ambiente IS NOT NULL\n",
+        "ORDER BY\n",
+        "  Ambiente"
       ]
     },
     {
@@ -397,10 +773,17 @@
       "displayName": "Filtro: Tipo de Execução",
       "queryLines": [
         "SELECT DISTINCT\n",
-        "  CASE WHEN LOWER(trigger_type) = 'cron' THEN 'Automatico' WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual' ELSE trigger_type END AS `Tipo de Execucao`\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "WHERE COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
-        "ORDER BY `Tipo de Execucao`"
+        "  CASE\n",
+        "    WHEN LOWER(trigger_type) = 'cron' THEN 'Automático'\n",
+        "    WHEN LOWER(trigger_type) = 'onetime' THEN 'Manual'\n",
+        "    ELSE trigger_type\n",
+        "  END AS `Tipo de Execução`\n",
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
+        "WHERE\n",
+        "  COALESCE(period_end_time, ingested_at) >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "ORDER BY\n",
+        "  `Tipo de Execução`"
       ]
     },
     {
@@ -408,34 +791,88 @@
       "displayName": "Heatmap Throughput (fonte × etapa)",
       "queryLines": [
         "WITH ultima_run AS (\n",
-        "  SELECT run_id, MAX(period_end_time) AS max_fim_ts\n",
-        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
-        "  WHERE run_id IS NOT NULL AND registros_processados IS NOT NULL AND registros_processados > 0\n",
-        "    AND duracao_segundos IS NOT NULL AND duracao_segundos > 0 AND period_end_time IS NOT NULL\n",
-        "  GROUP BY run_id ORDER BY max_fim_ts DESC LIMIT 1)\n",
-        "SELECT fonte, etapa,\n",
-        "  ROUND(SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0), 1) AS throughput_reg_min,\n",
+        "  SELECT\n",
+        "    run_id,\n",
+        "    MAX(period_end_time) AS max_fim_ts\n",
+        "  FROM\n",
+        "    workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
+        "  WHERE\n",
+        "    run_id IS NOT NULL\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND registros_processados > 0\n",
+        "    AND duracao_segundos IS NOT NULL\n",
+        "    AND duracao_segundos > 0\n",
+        "    AND period_end_time IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    run_id\n",
+        "  ORDER BY\n",
+        "    max_fim_ts DESC\n",
+        "  LIMIT 1\n",
+        ")\n",
+        "SELECT\n",
+        "  fonte,\n",
+        "  etapa,\n",
+        "  ROUND(\n",
+        "    SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
+        "    1\n",
+        "  ) AS throughput_reg_min,\n",
         "  SUM(registros_processados) AS total_registros,\n",
         "  ROUND(SUM(duracao_segundos) / 60.0, 1) AS total_duracao_min\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
-        "WHERE run_id = (SELECT run_id FROM ultima_run)\n",
-        "  AND fonte IS NOT NULL AND etapa IN ('bronze', 'silver')\n",
-        "  AND registros_processados IS NOT NULL AND duracao_segundos IS NOT NULL\n",
-        "GROUP BY fonte, etapa ORDER BY fonte, etapa"
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
+        "WHERE\n",
+        "  run_id\n",
+        "    = (\n",
+        "      SELECT\n",
+        "        run_id\n",
+        "      FROM\n",
+        "        ultima_run\n",
+        "    )\n",
+        "  AND fonte IS NOT NULL\n",
+        "  AND etapa IN ('bronze', 'silver')\n",
+        "  AND registros_processados IS NOT NULL\n",
+        "  AND duracao_segundos IS NOT NULL\n",
+        "GROUP BY\n",
+        "  fonte,\n",
+        "  etapa\n",
+        "ORDER BY\n",
+        "  fonte,\n",
+        "  etapa"
       ]
     },
     {
       "name": "exe_cobertura_heatmap",
       "displayName": "Cobertura Pipeline (heatmap compacto)",
       "queryLines": [
-        "SELECT fonte, ano,\n",
-        "  CASE WHEN task_result_state = 'SUCCEEDED' THEN '✅' WHEN task_result_state = 'FAILED' THEN '❌'\n",
-        "    WHEN task_result_state = 'ERROR' THEN '❌' WHEN task_result_state = 'CANCELLED' THEN '⚠️' ELSE '❓' END AS status_emoji,\n",
+        "SELECT\n",
+        "  fonte,\n",
+        "  ano,\n",
+        "  CASE\n",
+        "    WHEN task_result_state = 'SUCCEEDED' THEN '✅'\n",
+        "    WHEN task_result_state = 'FAILED' THEN '❌'\n",
+        "    WHEN task_result_state = 'ERROR' THEN '❌'\n",
+        "    WHEN task_result_state = 'CANCELLED' THEN '⚠️'\n",
+        "    ELSE '❓'\n",
+        "  END AS status_emoji,\n",
         "  task_result_state AS status_raw\n",
-        "FROM (SELECT fonte, ano, task_result_state,\n",
-        "    ROW_NUMBER() OVER (PARTITION BY fonte, ano ORDER BY period_end_time DESC) AS rn\n",
-        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada WHERE fonte IS NOT NULL AND ano IS NOT NULL) sub\n",
-        "WHERE rn = 1 ORDER BY fonte, ano"
+        "FROM\n",
+        "  (\n",
+        "    SELECT\n",
+        "      fonte,\n",
+        "      ano,\n",
+        "      task_result_state,\n",
+        "      ROW_NUMBER() OVER (PARTITION BY fonte, ano ORDER BY period_end_time DESC) AS rn\n",
+        "    FROM\n",
+        "      workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
+        "    WHERE\n",
+        "      fonte IS NOT NULL\n",
+        "      AND ano IS NOT NULL\n",
+        "  ) sub\n",
+        "WHERE\n",
+        "  rn = 1\n",
+        "ORDER BY\n",
+        "  fonte,\n",
+        "  ano"
       ]
     },
     {
@@ -443,40 +880,93 @@
       "displayName": "KPIs Execução com Contexto",
       "queryLines": [
         "WITH ultima_run AS (\n",
-        "  SELECT run_id, MAX(period_end_time) AS max_fim_ts\n",
-        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
-        "  WHERE run_id IS NOT NULL AND registros_processados IS NOT NULL AND registros_processados > 0\n",
-        "    AND duracao_segundos IS NOT NULL AND duracao_segundos > 0 AND period_end_time IS NOT NULL\n",
-        "  GROUP BY run_id ORDER BY max_fim_ts DESC LIMIT 1),\n",
+        "  SELECT\n",
+        "    run_id,\n",
+        "    MAX(period_end_time) AS max_fim_ts\n",
+        "  FROM\n",
+        "    workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
+        "  WHERE\n",
+        "    run_id IS NOT NULL\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND registros_processados > 0\n",
+        "    AND duracao_segundos IS NOT NULL\n",
+        "    AND duracao_segundos > 0\n",
+        "    AND period_end_time IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    run_id\n",
+        "  ORDER BY\n",
+        "    max_fim_ts DESC\n",
+        "  LIMIT 1\n",
+        "),\n",
         "kpis_ultima AS (\n",
-        "  SELECT SUM(registros_processados) AS volume_total,\n",
+        "  SELECT\n",
+        "    SUM(registros_processados) AS volume_total,\n",
         "    ROUND(SUM(duracao_segundos) / 60.0, 1) AS duracao_total_min,\n",
-        "    ROUND(SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0), 0) AS throughput_reg_min,\n",
+        "    ROUND(\n",
+        "      SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
+        "      0\n",
+        "    ) AS throughput_reg_min,\n",
         "    COUNT(DISTINCT id_execucao) AS total_execucoes,\n",
         "    COUNT(DISTINCT CASE WHEN registros_processados > 0 THEN id_execucao END) AS execucoes_completas\n",
-        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
-        "  WHERE run_id = (SELECT run_id FROM ultima_run) AND registros_processados IS NOT NULL AND duracao_segundos IS NOT NULL),\n",
+        "  FROM\n",
+        "    workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
+        "  WHERE\n",
+        "    run_id = (SELECT run_id FROM ultima_run)\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND duracao_segundos IS NOT NULL\n",
+        "),\n",
         "kpis_48h AS (\n",
-        "  SELECT AVG(volume_total) AS media_volume_48h,\n",
+        "  SELECT\n",
+        "    AVG(volume_total) AS media_volume_48h,\n",
         "    PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY duracao_total_min) AS p10_duracao,\n",
         "    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duracao_total_min) AS p50_duracao,\n",
         "    PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY duracao_total_min) AS p90_duracao,\n",
         "    AVG(throughput_reg_min) AS media_throughput_48h\n",
-        "  FROM (SELECT run_id, SUM(registros_processados) AS volume_total,\n",
-        "    ROUND(SUM(duracao_segundos) / 60.0, 1) AS duracao_total_min,\n",
-        "    ROUND(SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0), 0) AS throughput_reg_min\n",
-        "    FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
-        "    WHERE period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
-        "      AND registros_processados IS NOT NULL AND registros_processados > 0\n",
-        "      AND duracao_segundos IS NOT NULL AND duracao_segundos > 0\n",
-        "    GROUP BY run_id) sub)\n",
-        "SELECT k.volume_total, k.duracao_total_min, k.throughput_reg_min, k.total_execucoes, k.execucoes_completas,\n",
-        "  ROUND(((k.volume_total - m.media_volume_48h) / NULLIF(m.media_volume_48h, 0)) * 100.0, 0) AS variacao_volume_pct,\n",
+        "  FROM\n",
+        "    (\n",
+        "      SELECT\n",
+        "        run_id,\n",
+        "        SUM(registros_processados) AS volume_total,\n",
+        "        ROUND(SUM(duracao_segundos) / 60.0, 1) AS duracao_total_min,\n",
+        "        ROUND(\n",
+        "          SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
+        "          0\n",
+        "        ) AS throughput_reg_min\n",
+        "      FROM\n",
+        "        workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
+        "      WHERE\n",
+        "        period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "        AND registros_processados IS NOT NULL\n",
+        "        AND registros_processados > 0\n",
+        "        AND duracao_segundos IS NOT NULL\n",
+        "        AND duracao_segundos > 0\n",
+        "      GROUP BY\n",
+        "        run_id\n",
+        "    ) sub\n",
+        ")\n",
+        "SELECT\n",
+        "  k.volume_total,\n",
+        "  k.duracao_total_min,\n",
+        "  k.throughput_reg_min,\n",
+        "  k.total_execucoes,\n",
+        "  k.execucoes_completas,\n",
+        "  ROUND(\n",
+        "    ((k.volume_total - m.media_volume_48h) / NULLIF(m.media_volume_48h, 0)) * 100.0,\n",
+        "    0\n",
+        "  ) AS variacao_volume_pct,\n",
         "  ROUND(m.media_volume_48h, 0) AS baseline_volume,\n",
-        "  ROUND(((k.throughput_reg_min - m.media_throughput_48h) / NULLIF(m.media_throughput_48h, 0)) * 100.0, 0) AS variacao_throughput_pct,\n",
-        "  ROUND(m.media_throughput_48h, 0) AS baseline_throughput, 100000 AS alvo_throughput,\n",
-        "  ROUND(m.p10_duracao, 1) AS p10_duracao, ROUND(m.p50_duracao, 1) AS p50_duracao, ROUND(m.p90_duracao, 1) AS p90_duracao\n",
-        "FROM kpis_ultima k CROSS JOIN kpis_48h m"
+        "  ROUND(\n",
+        "    ((k.throughput_reg_min - m.media_throughput_48h) / NULLIF(m.media_throughput_48h, 0)) * 100.0,\n",
+        "    0\n",
+        "  ) AS variacao_throughput_pct,\n",
+        "  ROUND(m.media_throughput_48h, 0) AS baseline_throughput,\n",
+        "  100000 AS alvo_throughput,\n",
+        "  ROUND(m.p10_duracao, 1) AS p10_duracao,\n",
+        "  ROUND(m.p50_duracao, 1) AS p50_duracao,\n",
+        "  ROUND(m.p90_duracao, 1) AS p90_duracao\n",
+        "FROM\n",
+        "  kpis_ultima k\n",
+        "    CROSS JOIN kpis_48h m"
       ]
     },
     {
@@ -484,85 +974,152 @@
       "displayName": "Insights e Alertas Automáticos",
       "queryLines": [
         "WITH ultima_run AS (\n",
-        "  SELECT run_id, MAX(period_end_time) AS max_fim_ts\n",
-        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
-        "  WHERE run_id IS NOT NULL AND registros_processados IS NOT NULL AND registros_processados > 0\n",
-        "    AND duracao_segundos IS NOT NULL AND duracao_segundos > 0 AND period_end_time IS NOT NULL\n",
-        "  GROUP BY run_id ORDER BY max_fim_ts DESC LIMIT 1),\n",
+        "  SELECT\n",
+        "    run_id,\n",
+        "    MAX(period_end_time) AS max_fim_ts\n",
+        "  FROM\n",
+        "    workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
+        "  WHERE\n",
+        "    run_id IS NOT NULL\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND registros_processados > 0\n",
+        "    AND duracao_segundos IS NOT NULL\n",
+        "    AND duracao_segundos > 0\n",
+        "    AND period_end_time IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    run_id\n",
+        "  ORDER BY\n",
+        "    max_fim_ts DESC\n",
+        "  LIMIT 1\n",
+        "),\n",
         "metricas_ultima AS (\n",
-        "  SELECT fonte, etapa,\n",
-        "    ROUND(SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0), 0) AS throughput_atual\n",
-        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
-        "  WHERE run_id = (SELECT run_id FROM ultima_run) AND fonte IS NOT NULL AND etapa IN ('bronze', 'silver')\n",
-        "    AND registros_processados IS NOT NULL AND duracao_segundos IS NOT NULL\n",
-        "  GROUP BY fonte, etapa),\n",
+        "  SELECT\n",
+        "    fonte,\n",
+        "    etapa,\n",
+        "    ROUND(\n",
+        "      SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
+        "      0\n",
+        "    ) AS throughput_atual\n",
+        "  FROM\n",
+        "    workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
+        "  WHERE\n",
+        "    run_id\n",
+        "      = (\n",
+        "        SELECT\n",
+        "          run_id\n",
+        "        FROM\n",
+        "          ultima_run\n",
+        "      )\n",
+        "    AND fonte IS NOT NULL\n",
+        "    AND etapa IN ('bronze', 'silver')\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND duracao_segundos IS NOT NULL\n",
+        "  GROUP BY\n",
+        "    fonte,\n",
+        "    etapa\n",
+        "),\n",
         "baselines AS (\n",
-        "  SELECT fonte, etapa, ROUND(AVG(throughput_run), 0) AS throughput_baseline\n",
-        "  FROM (SELECT fonte, etapa, run_id,\n",
-        "    ROUND(SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0), 0) AS throughput_run\n",
-        "    FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
-        "    WHERE period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS AND fonte IS NOT NULL AND etapa IN ('bronze', 'silver')\n",
-        "      AND registros_processados IS NOT NULL AND registros_processados > 0\n",
-        "      AND duracao_segundos IS NOT NULL AND duracao_segundos > 0\n",
-        "    GROUP BY fonte, etapa, run_id) sub\n",
-        "  GROUP BY fonte, etapa),\n",
+        "  SELECT\n",
+        "    fonte,\n",
+        "    etapa,\n",
+        "    ROUND(AVG(throughput_run), 0) AS throughput_baseline\n",
+        "  FROM\n",
+        "    (\n",
+        "      SELECT\n",
+        "        fonte,\n",
+        "        etapa,\n",
+        "        run_id,\n",
+        "        ROUND(\n",
+        "          SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
+        "          0\n",
+        "        ) AS throughput_run\n",
+        "      FROM\n",
+        "        workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
+        "      WHERE\n",
+        "        period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 7 DAYS\n",
+        "        AND fonte IS NOT NULL\n",
+        "        AND etapa IN ('bronze', 'silver')\n",
+        "        AND registros_processados IS NOT NULL\n",
+        "        AND registros_processados > 0\n",
+        "        AND duracao_segundos IS NOT NULL\n",
+        "        AND duracao_segundos > 0\n",
+        "      GROUP BY\n",
+        "        fonte,\n",
+        "        etapa,\n",
+        "        run_id\n",
+        "    ) sub\n",
+        "  GROUP BY\n",
+        "    fonte,\n",
+        "    etapa\n",
+        "),\n",
         "analise AS (\n",
-        "  SELECT m.fonte, m.etapa, m.throughput_atual, b.throughput_baseline,\n",
-        "    ROUND(((m.throughput_atual - b.throughput_baseline) / NULLIF(b.throughput_baseline, 0)) * 100.0, 0) AS variacao_pct,\n",
-        "    CASE WHEN m.throughput_atual < b.throughput_baseline * 0.7 THEN 'CRITICO'\n",
-        "      WHEN m.throughput_atual < b.throughput_baseline * 0.85 THEN 'ATENCAO' ELSE 'OK' END AS status\n",
-        "  FROM metricas_ultima m INNER JOIN baselines b ON m.fonte = b.fonte AND m.etapa = b.etapa)\n",
-        "SELECT CONCAT(fonte, ' / ', etapa) AS fonte_etapa, throughput_atual, throughput_baseline, variacao_pct, status,\n",
-        "  CASE WHEN status = 'CRITICO' THEN CONCAT('CRITICO: ', fonte, ' ', etapa, ' com throughput ', ABS(variacao_pct), '% abaixo da baseline')\n",
-        "    WHEN status = 'ATENCAO' THEN CONCAT('ATENCAO: ', fonte, ' ', etapa, ' com throughput ', ABS(variacao_pct), '% abaixo da baseline')\n",
-        "    ELSE CONCAT(fonte, ' ', etapa, ' dentro do esperado (', variacao_pct, '% vs baseline)') END AS mensagem\n",
-        "FROM analise\n",
-        "ORDER BY CASE status WHEN 'CRITICO' THEN 1 WHEN 'ATENCAO' THEN 2 ELSE 3 END, variacao_pct"
-      ]
-    },
-    {
-      "name": "filtro_runs",
-      "displayName": "Filtro: Últimas Runs",
-      "queryLines": [
-        "SELECT DISTINCT run_id, DATE_FORMAT(period_end_time, 'dd/MM HH:mm') AS run_timestamp,\n",
-        "  CONCAT(run_id, ' - ', DATE_FORMAT(period_end_time, 'dd/MM HH:mm')) AS run_label\n",
-        "FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_runs\n",
-        "WHERE period_end_time IS NOT NULL\n",
-        "ORDER BY run_id DESC\n",
-        "LIMIT 20"
-      ]
-    },
-    {
-      "name": "filtro_fonte",
-      "displayName": "Filtro: Fonte",
-      "queryLines": [
-        "SELECT DISTINCT\n",
-        "  fonte\n",
+        "  SELECT\n",
+        "    m.fonte,\n",
+        "    m.etapa,\n",
+        "    m.throughput_atual,\n",
+        "    b.throughput_baseline,\n",
+        "    ROUND(\n",
+        "      ((m.throughput_atual - b.throughput_baseline) / NULLIF(b.throughput_baseline, 0)) * 100.0,\n",
+        "      0\n",
+        "    ) AS variacao_pct,\n",
+        "    CASE\n",
+        "      WHEN m.throughput_atual < b.throughput_baseline * 0.7 THEN 'CRITICO'\n",
+        "      WHEN m.throughput_atual < b.throughput_baseline * 0.85 THEN 'ATENCAO'\n",
+        "      ELSE 'OK'\n",
+        "    END AS status\n",
+        "  FROM\n",
+        "    metricas_ultima m\n",
+        "      INNER JOIN baselines b\n",
+        "        ON m.fonte = b.fonte\n",
+        "        AND m.etapa = b.etapa\n",
+        ")\n",
+        "SELECT\n",
+        "  CONCAT(fonte, ' / ', etapa) AS fonte_etapa,\n",
+        "  throughput_atual,\n",
+        "  throughput_baseline,\n",
+        "  variacao_pct,\n",
+        "  status,\n",
+        "  CASE\n",
+        "    WHEN\n",
+        "      status = 'CRITICO'\n",
+        "    THEN\n",
+        "      CONCAT(\n",
+        "        'CRÍTICO: ',\n",
+        "        fonte,\n",
+        "        ' ',\n",
+        "        etapa,\n",
+        "        ' com throughput ',\n",
+        "        ABS(variacao_pct),\n",
+        "        '% abaixo da baseline — investigar urgente'\n",
+        "      )\n",
+        "    WHEN\n",
+        "      status = 'ATENCAO'\n",
+        "    THEN\n",
+        "      CONCAT(\n",
+        "        'ATENÇÃO: ',\n",
+        "        fonte,\n",
+        "        ' ',\n",
+        "        etapa,\n",
+        "        ' com throughput ',\n",
+        "        ABS(variacao_pct),\n",
+        "        '% abaixo da baseline — monitorar'\n",
+        "      )\n",
+        "    ELSE CONCAT(fonte, ' ', etapa, ' dentro do esperado (', variacao_pct, '% vs baseline)')\n",
+        "  END AS mensagem\n",
         "FROM\n",
-        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes\n",
-        "WHERE\n",
-        "  fonte IS NOT NULL\n",
+        "  analise\n",
         "ORDER BY\n",
-        "  fonte"
-      ]
-    },
-    {
-      "name": "filtro_etapa",
-      "displayName": "Filtro: Etapa",
-      "queryLines": [
-        "SELECT DISTINCT\n",
-        "  etapa\n",
-        "FROM\n",
-        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes\n",
-        "WHERE\n",
-        "  etapa IS NOT NULL\n",
-        "ORDER BY\n",
-        "  etapa"
+        "  CASE status\n",
+        "    WHEN 'CRITICO' THEN 1\n",
+        "    WHEN 'ATENCAO' THEN 2\n",
+        "    ELSE 3\n",
+        "  END,\n",
+        "  variacao_pct"
       ]
     },
     {
       "name": "exe_scatter_melhorado",
-      "displayName": "Scatter Duração×Registros",
+      "displayName": "Scatter Duração×Registros (pipeline bronze/silver)",
       "queryLines": [
         "SELECT\n",
         "  id_execucao,\n",
@@ -579,7 +1136,8 @@
         "WHERE\n",
         "  registros_processados IS NOT NULL\n",
         "  AND duracao_segundos IS NOT NULL\n",
-        "  AND etapa IN ('bronze', 'silver', 'verificacao')\n",
+        "  AND etapa IN ('bronze', 'silver')\n",
+        "  AND fim_ts >= CURRENT_TIMESTAMP() - INTERVAL 35 DAYS\n",
         "ORDER BY\n",
         "  run_id DESC,\n",
         "  etapa"
@@ -589,30 +1147,729 @@
     },
     {
       "name": "exe_kpis_periodo",
-      "displayName": "KPIs Execução por Período (48h)",
+      "displayName": "KPIs Execução por Semana (pipeline bronze/silver)",
       "queryLines": [
-        "WITH run_metrics AS (\n",
-        "  SELECT MAX(period_end_time) AS run_period, SUM(registros_processados) AS volume_total,\n",
+        "WITH pipeline_execs AS (\n",
+        "  SELECT\n",
+        "    run_id,\n",
+        "    id_execucao,\n",
+        "    registros_processados,\n",
+        "    duracao_segundos,\n",
+        "    from_utc_timestamp(fim_ts, 'America/Sao_Paulo') AS fim_local,\n",
+        "    CAST(date_trunc('week', from_utc_timestamp(fim_ts, 'America/Sao_Paulo')) AS DATE) AS semana\n",
+        "  FROM\n",
+        "    workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes\n",
+        "  WHERE\n",
+        "    etapa IN ('bronze', 'silver')\n",
+        "    AND run_id IS NOT NULL\n",
+        "    AND fim_ts IS NOT NULL\n",
+        "    AND registros_processados IS NOT NULL\n",
+        "    AND registros_processados > 0\n",
+        "    AND duracao_segundos IS NOT NULL\n",
+        "    AND duracao_segundos > 0\n",
+        "),\n",
+        "run_metrics AS (\n",
+        "  SELECT\n",
+        "    run_id,\n",
+        "    MAX(semana) AS semana,\n",
+        "    MAX(fim_local) AS run_period,\n",
+        "    SUM(registros_processados) AS volume_total,\n",
         "    ROUND(SUM(duracao_segundos) / 60.0, 1) AS duracao_total_min,\n",
-        "    ROUND(SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0), 0) AS throughput_reg_min,\n",
-        "    COUNT(DISTINCT id_execucao) AS total_execucoes,\n",
-        "    COUNT(DISTINCT CASE WHEN registros_processados > 0 THEN id_execucao END) AS execucoes_completas\n",
-        "  FROM workspace.{{SCHEMA_PREFIX}}_05_apoio.base_unificada\n",
-        "  WHERE period_end_time >= CURRENT_TIMESTAMP() - INTERVAL 48 HOURS AND run_id IS NOT NULL\n",
-        "    AND registros_processados IS NOT NULL AND registros_processados > 0\n",
-        "    AND duracao_segundos IS NOT NULL AND duracao_segundos > 0 AND period_end_time IS NOT NULL\n",
-        "  GROUP BY run_id),\n",
+        "    ROUND(\n",
+        "      SUM(registros_processados) / NULLIF(SUM(duracao_segundos) / 60.0, 0),\n",
+        "      0\n",
+        "    ) AS throughput_reg_min\n",
+        "  FROM\n",
+        "    pipeline_execs\n",
+        "  GROUP BY\n",
+        "    run_id\n",
+        "),\n",
+        "week_metrics AS (\n",
+        "  SELECT\n",
+        "    semana,\n",
+        "    COUNT(*) AS runs_na_semana,\n",
+        "    AVG(volume_total) AS sem_volume,\n",
+        "    AVG(duracao_total_min) AS sem_duracao,\n",
+        "    AVG(throughput_reg_min) AS sem_throughput\n",
+        "  FROM\n",
+        "    run_metrics\n",
+        "  GROUP BY\n",
+        "    semana\n",
+        "),\n",
         "baselines AS (\n",
-        "  SELECT ROUND(AVG(volume_total), 0) AS baseline_volume, ROUND(AVG(throughput_reg_min), 0) AS baseline_throughput,\n",
-        "    ROUND(AVG(duracao_total_min), 1) AS baseline_duracao, ROUND(AVG(execucoes_completas), 0) AS baseline_completude\n",
-        "  FROM run_metrics)\n",
-        "SELECT r.run_period, r.volume_total, r.duracao_total_min, r.throughput_reg_min, r.total_execucoes, r.execucoes_completas,\n",
-        "  b.baseline_volume, b.baseline_throughput, b.baseline_duracao, b.baseline_completude\n",
-        "FROM run_metrics r CROSS JOIN baselines b ORDER BY r.run_period ASC"
+        "  SELECT\n",
+        "    r.run_id,\n",
+        "    ROUND(AVG(w.sem_volume), 0) AS baseline_volume,\n",
+        "    ROUND(AVG(w.sem_throughput), 0) AS baseline_throughput,\n",
+        "    ROUND(AVG(w.sem_duracao), 1) AS baseline_duracao,\n",
+        "    ROUND(AVG(w.runs_na_semana), 0) AS baseline_runs,\n",
+        "    COUNT(w.semana) AS semanas_baseline,\n",
+        "    SUM(w.runs_na_semana) + 1 AS total_runs_analise\n",
+        "  FROM\n",
+        "    run_metrics r\n",
+        "      JOIN week_metrics w\n",
+        "        ON w.semana >= DATE_SUB(r.semana, 28)\n",
+        "        AND w.semana < r.semana\n",
+        "  GROUP BY\n",
+        "    r.run_id\n",
+        ")\n",
+        "SELECT\n",
+        "  r.run_period,\n",
+        "  r.volume_total,\n",
+        "  r.duracao_total_min,\n",
+        "  r.throughput_reg_min,\n",
+        "  w.runs_na_semana,\n",
+        "  b.baseline_volume,\n",
+        "  b.baseline_throughput,\n",
+        "  b.baseline_duracao,\n",
+        "  b.baseline_runs,\n",
+        "  b.semanas_baseline,\n",
+        "  b.total_runs_analise\n",
+        "FROM\n",
+        "  run_metrics r\n",
+        "    JOIN week_metrics w\n",
+        "      ON w.semana = r.semana\n",
+        "    LEFT JOIN baselines b\n",
+        "      ON b.run_id = r.run_id\n",
+        "ORDER BY\n",
+        "  r.run_period DESC"
+      ]
+    },
+    {
+      "name": "exe_volume_breakdown",
+      "displayName": "Volume por Fonte/Ano/Etapa por Semana (35 dias)",
+      "queryLines": [
+        "SELECT\n",
+        "  CAST(date_trunc('week', from_utc_timestamp(fim_ts, 'America/Sao_Paulo')) AS DATE) AS semana,\n",
+        "  fonte,\n",
+        "  ano,\n",
+        "  etapa,\n",
+        "  SUM(registros_processados) AS registros\n",
+        "FROM\n",
+        "  workspace.{{SCHEMA_PREFIX}}_05_apoio.observabilidade_execucoes\n",
+        "WHERE\n",
+        "  etapa IN ('bronze', 'silver')\n",
+        "  AND fonte IS NOT NULL\n",
+        "  AND ano IS NOT NULL\n",
+        "  AND registros_processados IS NOT NULL\n",
+        "  AND fim_ts >= CURRENT_TIMESTAMP() - INTERVAL 35 DAYS\n",
+        "GROUP BY\n",
+        "  semana,\n",
+        "  fonte,\n",
+        "  ano,\n",
+        "  etapa\n",
+        "ORDER BY\n",
+        "  semana DESC,\n",
+        "  fonte,\n",
+        "  ano,\n",
+        "  etapa"
+      ]
+    },
+    {
+      "name": "ing_resumo_ingestao",
+      "displayName": "Resumo Ingestão",
+      "queryLines": [
+        "SELECT\n",
+        "  MAX(\n",
+        "    CASE\n",
+        "      WHEN status = 'SUCCESS' THEN ingest_ts\n",
+        "    END\n",
+        "  ) AS ultima_ingestao,\n",
+        "  MAX(\n",
+        "    CASE\n",
+        "      WHEN status = 'SUCCESS' THEN last_modified_cvm\n",
+        "    END\n",
+        "  ) AS ultima_versao_cvm,\n",
+        "  DATEDIFF(\n",
+        "    CAST(\n",
+        "      MAX(\n",
+        "        CASE\n",
+        "          WHEN status = 'SUCCESS' THEN ingest_ts\n",
+        "        END\n",
+        "      ) AS DATE\n",
+        "    ),\n",
+        "    CAST(\n",
+        "      MAX(\n",
+        "        CASE\n",
+        "          WHEN status = 'SUCCESS' THEN last_modified_cvm\n",
+        "        END\n",
+        "      ) AS DATE\n",
+        "    )\n",
+        "  ) AS dias_publicacao_ate_ingestao,\n",
+        "  COUNT(DISTINCT\n",
+        "    CASE\n",
+        "      WHEN status = 'SUCCESS' THEN ano\n",
+        "    END\n",
+        "  ) AS anos_cobertos\n",
+        "FROM\n",
+        "  {{SCHEMA_PREFIX}}_05_apoio.controle_ingestao\n",
+        "WHERE\n",
+        "  fonte NOT IN ('landing_verificacao')"
+      ],
+      "catalog": "workspace",
+      "schema": "{{SCHEMA_PREFIX}}_05_apoio"
+    },
+    {
+      "name": "ing_volume_tempo",
+      "displayName": "Volume Baixado ao Longo do Tempo",
+      "queryLines": [
+        "SELECT\n",
+        "  DATE(ingest_ts) AS data_verificacao,\n",
+        "  ROUND(SUM(bytes_arquivo) / 1024.0 / 1024.0, 1) AS mb_baixados\n",
+        "FROM\n",
+        "  {{SCHEMA_PREFIX}}_05_apoio.controle_ingestao\n",
+        "WHERE\n",
+        "  fonte = 'landing_verificacao'\n",
+        "  AND status = 'SUCCESS'\n",
+        "  AND bytes_arquivo IS NOT NULL\n",
+        "  AND ingest_ts >= CURRENT_TIMESTAMP() - INTERVAL 30 DAYS\n",
+        "GROUP BY\n",
+        "  DATE(ingest_ts)\n",
+        "ORDER BY\n",
+        "  data_verificacao ASC"
+      ]
+    },
+    {
+      "name": "ing_latencia_evento",
+      "displayName": "Latência de Captura por Evento",
+      "queryLines": [
+        "SELECT\n",
+        "  CONCAT(\n",
+        "    DATE_FORMAT(from_utc_timestamp(ingest_ts, 'America/Sao_Paulo'), 'dd/MM'),\n",
+        "    ' • ',\n",
+        "    ano\n",
+        "  ) AS evento,\n",
+        "  ROUND(DATEDIFF(MINUTE, last_modified_cvm, ingest_ts) / 60.0, 1) AS latencia_horas\n",
+        "FROM\n",
+        "  {{SCHEMA_PREFIX}}_05_apoio.controle_ingestao\n",
+        "WHERE\n",
+        "  fonte = 'landing_verificacao'\n",
+        "  AND status = 'SUCCESS'\n",
+        "  AND last_modified_cvm IS NOT NULL\n",
+        "  AND ingest_ts >= CURRENT_TIMESTAMP() - INTERVAL 30 DAYS\n",
+        "ORDER BY\n",
+        "  ingest_ts ASC"
+      ]
+    },
+    {
+      "name": "ing_volume_ano",
+      "displayName": "Volume Baixado por Ano",
+      "queryLines": [
+        "SELECT\n",
+        "  ano,\n",
+        "  ROUND(bytes_arquivo / 1024.0 / 1024.0, 1) AS mb_baixados\n",
+        "FROM\n",
+        "  (\n",
+        "    SELECT\n",
+        "      ano,\n",
+        "      bytes_arquivo,\n",
+        "      ROW_NUMBER() OVER (PARTITION BY ano ORDER BY ingest_ts DESC) AS rn\n",
+        "    FROM\n",
+        "      {{SCHEMA_PREFIX}}_05_apoio.controle_ingestao\n",
+        "    WHERE\n",
+        "      fonte = 'landing_verificacao'\n",
+        "      AND status = 'SUCCESS'\n",
+        "      AND bytes_arquivo IS NOT NULL\n",
+        "  ) sub\n",
+        "WHERE\n",
+        "  rn = 1\n",
+        "ORDER BY\n",
+        "  ano"
+      ]
+    },
+    {
+      "name": "ing_status_verificacao",
+      "displayName": "Status das Verificações",
+      "queryLines": [
+        "SELECT\n",
+        "  DATE(ingest_ts) AS data_verificacao,\n",
+        "  status,\n",
+        "  COUNT(*) AS contagem\n",
+        "FROM\n",
+        "  {{SCHEMA_PREFIX}}_05_apoio.controle_ingestao\n",
+        "WHERE\n",
+        "  fonte = 'landing_verificacao'\n",
+        "  AND ingest_ts >= CURRENT_TIMESTAMP() - INTERVAL 30 DAYS\n",
+        "GROUP BY\n",
+        "  DATE(ingest_ts),\n",
+        "  status\n",
+        "ORDER BY\n",
+        "  data_verificacao ASC"
       ]
     }
   ],
   "pages": [
+    {
+      "name": "ingestao",
+      "displayName": "Ingestão",
+      "layout": [
+        {
+          "widget": {
+            "name": "ing_counter_ultima_ingestao",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_resumo_ingestao",
+                  "fields": [
+                    {
+                      "name": "ultima_ingestao",
+                      "expression": "`ultima_ingestao`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": {
+                  "value": "Última ingestão",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "ultima_ingestao",
+                  "format": {
+                    "type": "date-time",
+                    "date": "locale-short-month",
+                    "time": "locale-hour-minute"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ing_counter_ultima_versao",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_resumo_ingestao",
+                  "fields": [
+                    {
+                      "name": "ultima_versao_cvm",
+                      "expression": "`ultima_versao_cvm`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": {
+                  "value": "Última versão publicada pela CVM",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "ultima_versao_cvm",
+                  "format": {
+                    "type": "date-time",
+                    "date": "locale-short-month",
+                    "time": "locale-hour-minute"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ing_counter_dias_ate",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_resumo_ingestao",
+                  "fields": [
+                    {
+                      "name": "dias_publicacao_ate_ingestao",
+                      "expression": "`dias_publicacao_ate_ingestao`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": {
+                  "value": "Dias até ingestão",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "dias_publicacao_ate_ingestao",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ing_counter_anos_cobertos",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_resumo_ingestao",
+                  "fields": [
+                    {
+                      "name": "anos_cobertos",
+                      "expression": "`anos_cobertos`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": {
+                  "value": "Anos cobertos",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "anos_cobertos",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 10,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ing_line_volume_tempo",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_volume_tempo",
+                  "fields": [
+                    {
+                      "name": "data_verificacao",
+                      "expression": "`data_verificacao`"
+                    },
+                    {
+                      "name": "sum(mb_baixados)",
+                      "expression": "SUM(`mb_baixados`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Volume baixado ao longo do tempo (MB)"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "data_verificacao",
+                  "displayName": "data_verificacao",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(mb_baixados)",
+                  "displayName": "mb_baixados",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 7,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "ing_bar_latencia",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_latencia_evento",
+                  "fields": [
+                    {
+                      "name": "evento",
+                      "expression": "`evento`"
+                    },
+                    {
+                      "name": "sum(latencia_horas)",
+                      "expression": "SUM(`latencia_horas`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Latência de captura por evento (horas)"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "evento",
+                  "displayName": "evento",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(latencia_horas)",
+                  "displayName": "latencia_horas",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "evento",
+                  "displayName": "evento",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 7,
+            "y": 3,
+            "width": 5,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "ing_bar_volume_ano",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_volume_ano",
+                  "fields": [
+                    {
+                      "name": "ano",
+                      "expression": "`ano`"
+                    },
+                    {
+                      "name": "sum(mb_baixados)",
+                      "expression": "SUM(`mb_baixados`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Volume baixado por ano (MB)"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "ano",
+                  "displayName": "ano",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(mb_baixados)",
+                  "displayName": "mb_baixados",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "ano",
+                  "displayName": "ano",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 7,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "ing_bar_status",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ing_status_verificacao",
+                  "fields": [
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "data_verificacao",
+                      "expression": "`data_verificacao`"
+                    },
+                    {
+                      "name": "sum(contagem)",
+                      "expression": "SUM(`contagem`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Status das verificações (30 dias)"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "data_verificacao",
+                  "displayName": "data_verificacao",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(contagem)",
+                  "displayName": "contagem",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "status",
+                  "displayName": "status",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 7,
+            "y": 9,
+            "width": 5,
+            "height": 4
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
     {
       "name": "c625375b",
       "displayName": "Orquestração",
@@ -944,7 +2201,7 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "status_saude_pipeline",
+                  "datasetName": "orq_status_hero",
                   "fields": [
                     {
                       "name": "status_pipeline",
@@ -958,6 +2215,7 @@
             "spec": {
               "frame": {
                 "showTitle": true,
+                "contentAlignment": "left",
                 "title": {
                   "value": "Status do pipeline (últimos 7 dias)",
                   "fields": []
@@ -978,7 +2236,7 @@
           "position": {
             "x": 0,
             "y": 0,
-            "width": 3,
+            "width": 12,
             "height": 2
           }
         },
@@ -987,7 +2245,7 @@
             "name": "filtro_ambiente",
             "queries": [
               {
-                "name": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc1498c4145db9adc1a9421f44e8_Ambiente",
+                "name": "dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130fa1b01fbd93662d40_Ambiente",
                 "query": {
                   "datasetName": "filtro_ambiente",
                   "fields": [
@@ -1002,20 +2260,125 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130e822bf60500814945_ambiente",
+                "query": {
+                  "datasetName": "orq_execucoes_48h",
+                  "parameters": [
+                    {
+                      "name": "ambiente",
+                      "keyword": "ambiente"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130db5efd71cdad39374_ambiente",
+                "query": {
+                  "datasetName": "orq_status_hero",
+                  "parameters": [
+                    {
+                      "name": "ambiente",
+                      "keyword": "ambiente"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec52271308af3a0c793e67e08a_ambiente",
+                "query": {
+                  "datasetName": "orq_media_5runs",
+                  "parameters": [
+                    {
+                      "name": "ambiente",
+                      "keyword": "ambiente"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130895f071ec3a0e20f2_ambiente",
+                "query": {
+                  "datasetName": "orq_taxa_sucesso",
+                  "parameters": [
+                    {
+                      "name": "ambiente",
+                      "keyword": "ambiente"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130ea76202f882841b3c_ambiente",
+                "query": {
+                  "datasetName": "orq_duracao_formatada",
+                  "parameters": [
+                    {
+                      "name": "ambiente",
+                      "keyword": "ambiente"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec52271309bd21eced39aee611_ambiente",
+                "query": {
+                  "datasetName": "orq_task_breakdown",
+                  "parameters": [
+                    {
+                      "name": "ambiente",
+                      "keyword": "ambiente"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
               "version": 2,
               "frame": {
                 "showTitle": true,
-                "title": "Ambiente"
+                "title": {
+                  "fields": [],
+                  "value": "Ambiente"
+                }
               },
               "widgetType": "filter-multi-select",
               "encodings": {
                 "fields": [
                   {
                     "fieldName": "Ambiente",
-                    "queryName": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc1498c4145db9adc1a9421f44e8_Ambiente"
+                    "queryName": "dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130fa1b01fbd93662d40_Ambiente"
+                  },
+                  {
+                    "parameterName": "ambiente",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130e822bf60500814945_ambiente"
+                  },
+                  {
+                    "parameterName": "ambiente",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130db5efd71cdad39374_ambiente"
+                  },
+                  {
+                    "parameterName": "ambiente",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec52271308af3a0c793e67e08a_ambiente"
+                  },
+                  {
+                    "parameterName": "ambiente",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130895f071ec3a0e20f2_ambiente"
+                  },
+                  {
+                    "parameterName": "ambiente",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130ea76202f882841b3c_ambiente"
+                  },
+                  {
+                    "parameterName": "ambiente",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec52271309bd21eced39aee611_ambiente"
                   }
                 ]
               }
@@ -1033,7 +2396,7 @@
             "name": "filtro_tipo_exec",
             "queries": [
               {
-                "name": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc1499091a38990d999172033ecf_Tipo de Execução",
+                "name": "dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130f848adfce51c0e5f6_Tipo de Execução",
                 "query": {
                   "datasetName": "filtro_tipo_exec",
                   "fields": [
@@ -1048,20 +2411,125 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130e822bf60500814945_tipo_execucao",
+                "query": {
+                  "datasetName": "orq_execucoes_48h",
+                  "parameters": [
+                    {
+                      "name": "tipo_execucao",
+                      "keyword": "tipo_execucao"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130db5efd71cdad39374_tipo_execucao",
+                "query": {
+                  "datasetName": "orq_status_hero",
+                  "parameters": [
+                    {
+                      "name": "tipo_execucao",
+                      "keyword": "tipo_execucao"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec52271308af3a0c793e67e08a_tipo_execucao",
+                "query": {
+                  "datasetName": "orq_media_5runs",
+                  "parameters": [
+                    {
+                      "name": "tipo_execucao",
+                      "keyword": "tipo_execucao"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130895f071ec3a0e20f2_tipo_execucao",
+                "query": {
+                  "datasetName": "orq_taxa_sucesso",
+                  "parameters": [
+                    {
+                      "name": "tipo_execucao",
+                      "keyword": "tipo_execucao"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130ea76202f882841b3c_tipo_execucao",
+                "query": {
+                  "datasetName": "orq_duracao_formatada",
+                  "parameters": [
+                    {
+                      "name": "tipo_execucao",
+                      "keyword": "tipo_execucao"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec52271309bd21eced39aee611_tipo_execucao",
+                "query": {
+                  "datasetName": "orq_task_breakdown",
+                  "parameters": [
+                    {
+                      "name": "tipo_execucao",
+                      "keyword": "tipo_execucao"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
               "version": 2,
               "frame": {
                 "showTitle": true,
-                "title": "Tipo de execução"
+                "title": {
+                  "fields": [],
+                  "value": "Tipo de execução"
+                }
               },
               "widgetType": "filter-multi-select",
               "encodings": {
                 "fields": [
                   {
                     "fieldName": "Tipo de Execução",
-                    "queryName": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc1499091a38990d999172033ecf_Tipo de Execução"
+                    "queryName": "dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130f848adfce51c0e5f6_Tipo de Execução"
+                  },
+                  {
+                    "parameterName": "tipo_execucao",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130e822bf60500814945_tipo_execucao"
+                  },
+                  {
+                    "parameterName": "tipo_execucao",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130db5efd71cdad39374_tipo_execucao"
+                  },
+                  {
+                    "parameterName": "tipo_execucao",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec52271308af3a0c793e67e08a_tipo_execucao"
+                  },
+                  {
+                    "parameterName": "tipo_execucao",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130895f071ec3a0e20f2_tipo_execucao"
+                  },
+                  {
+                    "parameterName": "tipo_execucao",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec5227130ea76202f882841b3c_tipo_execucao"
+                  },
+                  {
+                    "parameterName": "tipo_execucao",
+                    "queryName": "parameter_dashboards/01f1c1efa9a215f0a6863142f1bca025/datasets/01f1c5ec52271309bd21eced39aee611_tipo_execucao"
                   }
                 ]
               }
@@ -1213,9 +2681,9 @@
             }
           },
           "position": {
-            "x": 6,
-            "y": 8,
-            "width": 6,
+            "x": 5,
+            "y": 5,
+            "width": 7,
             "height": 6
           }
         },
@@ -1340,8 +2808,8 @@
           },
           "position": {
             "x": 0,
-            "y": 8,
-            "width": 6,
+            "y": 5,
+            "width": 5,
             "height": 6
           }
         },
@@ -1350,162 +2818,15 @@
             "name": "contexto_temporal",
             "multilineTextboxSpec": {
               "lines": [
-                "**Janela de dados:** Últimos 7 dias | **Baseline:** Média dos últimos 7 dias"
+                "**Cada semana pesa 1, independentemente do nº de execuções** | Semanas sem execução ficam fora da média | A semana corrente nunca entra na própria baseline"
               ]
             }
           },
           "position": {
             "x": 0,
-            "y": 7,
+            "y": 4,
             "width": 12,
             "height": 1
-          }
-        },
-        {
-          "widget": {
-            "name": "filtro_run",
-            "queries": [
-              {
-                "name": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc2a7ef81a6e8a364c9bd9868dac_run_id",
-                "query": {
-                  "datasetName": "filtro_runs",
-                  "fields": [
-                    {
-                      "name": "run_id",
-                      "expression": "`run_id`"
-                    },
-                    {
-                      "name": "run_id_associativity",
-                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Run (id)",
-                  "fields": []
-                }
-              },
-              "widgetType": "filter-single-select",
-              "encodings": {
-                "fields": [
-                  {
-                    "fieldName": "run_id",
-                    "queryName": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc2a7ef81a6e8a364c9bd9868dac_run_id"
-                  }
-                ]
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 2,
-            "width": 4,
-            "height": 2
-          }
-        },
-        {
-          "widget": {
-            "name": "filtro_fonte",
-            "queries": [
-              {
-                "name": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc2a7fa91368baaa3dda2376ec37_fonte",
-                "query": {
-                  "datasetName": "filtro_fonte",
-                  "fields": [
-                    {
-                      "name": "fonte",
-                      "expression": "`fonte`"
-                    },
-                    {
-                      "name": "fonte_associativity",
-                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Fonte",
-                  "fields": []
-                }
-              },
-              "widgetType": "filter-multi-select",
-              "encodings": {
-                "fields": [
-                  {
-                    "fieldName": "fonte",
-                    "queryName": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc2a7fa91368baaa3dda2376ec37_fonte"
-                  }
-                ]
-              }
-            }
-          },
-          "position": {
-            "x": 4,
-            "y": 2,
-            "width": 4,
-            "height": 2
-          }
-        },
-        {
-          "widget": {
-            "name": "filtro_etapa",
-            "queries": [
-              {
-                "name": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc2a810a1984aacb66039c097bdd_etapa",
-                "query": {
-                  "datasetName": "filtro_etapa",
-                  "fields": [
-                    {
-                      "name": "etapa",
-                      "expression": "`etapa`"
-                    },
-                    {
-                      "name": "etapa_associativity",
-                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
-                    }
-                  ],
-                  "disaggregated": false
-                }
-              }
-            ],
-            "spec": {
-              "version": 2,
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Etapa",
-                  "fields": []
-                }
-              },
-              "widgetType": "filter-multi-select",
-              "encodings": {
-                "fields": [
-                  {
-                    "fieldName": "etapa",
-                    "queryName": "dashboards/01f1badbcdcb11c9b1dee1e37ada16e6/datasets/01f1bc2a810a1984aacb66039c097bdd_etapa"
-                  }
-                ]
-              }
-            }
-          },
-          "position": {
-            "x": 8,
-            "y": 2,
-            "width": 4,
-            "height": 2
           }
         },
         {
@@ -1585,10 +2906,10 @@
             }
           },
           "position": {
-            "x": 0,
-            "y": 4,
+            "x": 3,
+            "y": 2,
             "width": 3,
-            "height": 3
+            "height": 2
           }
         },
         {
@@ -1632,7 +2953,7 @@
                   "fields": []
                 },
                 "description": {
-                  "value": "Registros processados por minuto",
+                  "value": "Registros por minuto",
                   "fields": []
                 }
               },
@@ -1668,10 +2989,10 @@
             }
           },
           "position": {
-            "x": 3,
-            "y": 4,
+            "x": 9,
+            "y": 2,
             "width": 3,
-            "height": 3
+            "height": 2
           }
         },
         {
@@ -1711,7 +3032,7 @@
                 "showTitle": true,
                 "showDescription": true,
                 "title": {
-                  "value": "Duração da run",
+                  "value": "Duração",
                   "fields": []
                 },
                 "description": {
@@ -1736,7 +3057,7 @@
                 "target": {
                   "fieldName": "baseline_duracao",
                   "period": {
-                    "offset": 1,
+                    "offset": 0,
                     "type": "relative-to-value-period"
                   }
                 },
@@ -1752,9 +3073,9 @@
           },
           "position": {
             "x": 6,
-            "y": 4,
+            "y": 2,
             "width": 3,
-            "height": 3
+            "height": 2
           }
         },
         {
@@ -1767,25 +3088,11 @@
                   "datasetName": "exe_kpis_periodo",
                   "fields": [
                     {
-                      "name": "run_period",
-                      "expression": "`run_period`"
-                    },
-                    {
-                      "name": "baseline_completude",
-                      "expression": "`baseline_completude`"
-                    },
-                    {
-                      "name": "execucoes_completas",
-                      "expression": "`execucoes_completas`"
+                      "name": "total_runs_analise",
+                      "expression": "`total_runs_analise`"
                     }
                   ],
-                  "disaggregated": true,
-                  "orders": [
-                    {
-                      "direction": "DESC",
-                      "expression": "`run_period`"
-                    }
-                  ]
+                  "disaggregated": true
                 }
               }
             ],
@@ -1794,38 +3101,19 @@
                 "showDescription": true,
                 "showTitle": true,
                 "title": {
-                  "fields": [],
-                  "value": "Completude"
+                  "value": "Execuções em análise",
+                  "fields": []
                 },
                 "description": {
                   "fields": [],
-                  "value": "Fontes por run"
+                  "value": "Total de runs"
                 }
               },
               "version": 2,
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "execucoes_completas",
-                  "format": {
-                    "abbreviation": "none",
-                    "decimalPlaces": {
-                      "places": 0,
-                      "type": "exact"
-                    },
-                    "type": "number-plain"
-                  }
-                },
-                "target": {
-                  "fieldName": "baseline_completude",
-                  "period": {
-                    "offset": 1,
-                    "type": "relative-to-value-period"
-                  }
-                },
-                "period": {
-                  "fieldName": "run_period",
-                  "hideLabels": true
+                  "fieldName": "total_runs_analise"
                 }
               },
               "data": {
@@ -1834,10 +3122,10 @@
             }
           },
           "position": {
-            "x": 9,
-            "y": 4,
+            "x": 0,
+            "y": 2,
             "width": 3,
-            "height": 3
+            "height": 2
           }
         },
         {
@@ -1867,7 +3155,7 @@
                 "showTitle": true,
                 "title": {
                   "fields": [],
-                  "value": "Tendência de duração por run"
+                  "value": "Duração por execução de pipeline (bronze/silver)"
                 }
               },
               "version": 3,
@@ -1907,7 +3195,7 @@
           },
           "position": {
             "x": 6,
-            "y": 14,
+            "y": 11,
             "width": 6,
             "height": 9
           }
@@ -2005,7 +3293,7 @@
           },
           "position": {
             "x": 0,
-            "y": 14,
+            "y": 11,
             "width": 6,
             "height": 9
           }
@@ -2015,8 +3303,8 @@
             "name": "header_status",
             "multilineTextboxSpec": {
               "lines": [
-                "## ✓ Pipeline operando dentro da normalidade\n",
-                "Comparação: última execução vs média dos últimos 7 dias"
+                "## Execução — pipeline bronze/silver\n",
+                "Comparação: última execução vs. média das 4 semanas anteriores"
               ]
             }
           },
@@ -2337,206 +3625,6 @@
             "y": 3,
             "width": 4,
             "height": 8
-          }
-        }
-      ],
-      "pageType": "PAGE_TYPE_CANVAS",
-      "layoutVersion": "GRID_V1"
-    },
-    {
-      "name": "ingestao",
-      "displayName": "Ingestão",
-      "layout": [
-        {
-          "widget": {
-            "name": "w15_data_recente",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "ing_data_recente",
-                  "fields": [
-                    {
-                      "name": "data_ingestao_recente",
-                      "expression": "`data_ingestao_recente`"
-                    }
-                  ],
-                  "disaggregated": true
-                }
-              }
-            ],
-            "spec": {
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Ingestão mais recente com sucesso",
-                  "fields": []
-                }
-              },
-              "version": 2,
-              "widgetType": "counter",
-              "encodings": {
-                "value": {
-                  "fieldName": "data_ingestao_recente"
-                }
-              },
-              "data": {
-                "queryName": "main_query"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 0,
-            "width": 12,
-            "height": 3
-          }
-        },
-        {
-          "widget": {
-            "name": "w16_freshness",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "ing_freshness",
-                  "fields": [
-                    {
-                      "name": "fonte",
-                      "expression": "`fonte`"
-                    },
-                    {
-                      "name": "ano",
-                      "expression": "`ano`"
-                    },
-                    {
-                      "name": "last_modified_cvm",
-                      "expression": "`last_modified_cvm`"
-                    },
-                    {
-                      "name": "ingest_ts",
-                      "expression": "`ingest_ts`"
-                    },
-                    {
-                      "name": "versao_ingestao",
-                      "expression": "`versao_ingestao`"
-                    },
-                    {
-                      "name": "status",
-                      "expression": "`status`"
-                    },
-                    {
-                      "name": "dias_desde_ingestao",
-                      "expression": "`dias_desde_ingestao`"
-                    }
-                  ],
-                  "disaggregated": true
-                }
-              }
-            ],
-            "spec": {
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Freshness por fonte e ano (dias desde ingestão)",
-                  "fields": []
-                }
-              },
-              "version": 2,
-              "widgetType": "table",
-              "encodings": {
-                "columns": [
-                  {
-                    "fieldName": "fonte"
-                  },
-                  {
-                    "fieldName": "ano"
-                  },
-                  {
-                    "fieldName": "last_modified_cvm"
-                  },
-                  {
-                    "fieldName": "ingest_ts"
-                  },
-                  {
-                    "fieldName": "versao_ingestao"
-                  },
-                  {
-                    "fieldName": "status"
-                  },
-                  {
-                    "fieldName": "dias_desde_ingestao"
-                  }
-                ]
-              },
-              "data": {
-                "queryName": "main_query"
-              }
-            }
-          },
-          "position": {
-            "x": 0,
-            "y": 3,
-            "width": 8,
-            "height": 10
-          }
-        },
-        {
-          "widget": {
-            "name": "w17_bytes_ano",
-            "queries": [
-              {
-                "name": "main_query",
-                "query": {
-                  "datasetName": "ing_bytes_ano",
-                  "fields": [
-                    {
-                      "name": "ano",
-                      "expression": "`ano`"
-                    },
-                    {
-                      "name": "total_bytes",
-                      "expression": "`total_bytes`"
-                    }
-                  ],
-                  "disaggregated": true
-                }
-              }
-            ],
-            "spec": {
-              "frame": {
-                "showTitle": true,
-                "title": {
-                  "value": "Volume por ano (bytes, última ingestão)",
-                  "fields": []
-                }
-              },
-              "version": 3,
-              "widgetType": "bar",
-              "encodings": {
-                "x": {
-                  "fieldName": "ano",
-                  "scale": {
-                    "type": "categorical"
-                  }
-                },
-                "y": {
-                  "fieldName": "total_bytes",
-                  "scale": {
-                    "type": "quantitative"
-                  }
-                }
-              },
-              "data": {
-                "queryName": "main_query"
-              }
-            }
-          },
-          "position": {
-            "x": 8,
-            "y": 3,
-            "width": 4,
-            "height": 10
           }
         }
       ],
