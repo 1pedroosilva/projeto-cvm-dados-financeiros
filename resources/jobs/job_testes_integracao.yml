@@ -1,6 +1,6 @@
 # Job Testes de Integração - Pipeline CVM
 # Propósito: Validação E2E (Bronze → Silver) em schemas isolados
-# Escopo: Pipelines DRE, BPA e BPP completos para ano 2021 (volume minimo, execucao rapida)
+# Escopo: Pipelines DRE, BPA, BPP e DFC completos para ano 2021 (volume minimo, execucao rapida)
 # Estratégia: Fail-fast via depends_on - falha em teste bloqueia próximos
 
 resources:
@@ -170,13 +170,57 @@ resources:
               JOB_NAME: "{{job.name}}"
               TRIGGER_TYPE: "{{job.trigger.type}}"
 
-        # TASK 11: Limpar schemas de teste (COMENTADO - manter dados para debug)
+        # TASK 11: Ingestao Bronze DFC para ano 2021
+        - task_key: test_bronze_dfc_2021
+          depends_on:
+            - task_key: validacoes_integracao_bpp
+          notebook_task:
+            notebook_path: ../../01_bronze/104_cvm_dfp_dfc.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
+              ANOS_OVERRIDE: "2021"
+
+        # TASK 12: Transformacao Silver DFC para ano 2021
+        - task_key: test_silver_dfc_2021
+          depends_on:
+            - task_key: test_bronze_dfc_2021
+          notebook_task:
+            notebook_path: ../../02_silver/204_cvm_dfp_dfc.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
+              ANOS_OVERRIDE: "2021"
+
+        # TASK 13: Validacoes de integracao DFC (contagens, PKs, metadados)
+        - task_key: validacoes_integracao_dfc
+          depends_on:
+            - task_key: test_silver_dfc_2021
+          notebook_task:
+            notebook_path: ../../06_testes/test_integracao_dfc.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
+
+        # TASK 14: Limpar schemas de teste (COMENTADO - manter dados para debug)
         # Descomente quando testes estiverem estáveis e você não precisar mais
         # inspecionar os dados após falhas
         #
         # - task_key: limpar_schemas_teste
         #   depends_on:
-        #     - task_key: validacoes_integracao_bpp
+        #     - task_key: validacoes_integracao_dfc
         #   run_if: ALL_DONE  # Roda sempre, mesmo se testes falharem
         #   notebook_task:
         #     notebook_path: ../../06_testes/cleanup_schemas_teste.py

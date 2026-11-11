@@ -1,5 +1,5 @@
 # Job CVM - Pipeline Completo Semanal
-# Bronze -> Silver para DRE, BPA, BPP em tres trilhos paralelos.
+# Bronze -> Silver para DRE, BPA, BPP, DFC em quatro trilhos paralelos.
 # Sem orquestrador e sem download (assumido ja feito pelo job diario).
 
 resources:
@@ -70,6 +70,19 @@ resources:
               JOB_NAME: "{{job.name}}"
               TRIGGER_TYPE: "{{job.trigger.type}}"
 
+        - task_key: bronze_dfc
+          depends_on:
+            - task_key: ddl_create_tables
+          notebook_task:
+            notebook_path: ../../01_bronze/104_cvm_dfp_dfc.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
+
         - task_key: silver_dre
           depends_on:
             - task_key: bronze_dre
@@ -101,6 +114,19 @@ resources:
             - task_key: bronze_bpp
           notebook_task:
             notebook_path: ../../02_silver/203_cvm_dfp_bpp.py
+            base_parameters:
+              AMBIENTE: ${bundle.target}
+              JOB_ID: "{{job.id}}"
+              RUN_ID: "{{job.run_id}}"
+              TASK_KEY: "{{task.name}}"
+              JOB_NAME: "{{job.name}}"
+              TRIGGER_TYPE: "{{job.trigger.type}}"
+
+        - task_key: silver_dfc
+          depends_on:
+            - task_key: bronze_dfc
+          notebook_task:
+            notebook_path: ../../02_silver/204_cvm_dfp_dfc.py
             base_parameters:
               AMBIENTE: ${bundle.target}
               JOB_ID: "{{job.id}}"
