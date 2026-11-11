@@ -12,8 +12,8 @@
 # MAGIC
 # MAGIC ## O que é criado
 # MAGIC * **4 schemas**: Bronze, Silver, Gold e Apoio
-# MAGIC * **3 tabelas Bronze**: 101_dre_dfp, 102_bpa_dfp, 103_bpp_dfp
-# MAGIC * **3 tabelas Silver**: 201_dre_dfp, 202_bpa_dfp, 203_bpp_dfp
+# MAGIC * **4 tabelas Bronze**: 101_dre_dfp, 102_bpa_dfp, 103_bpp_dfp, 104_dfc_dfp
+# MAGIC * **4 tabelas Silver**: 201_dre_dfp, 202_bpa_dfp, 203_bpp_dfp, 204_dfc_dfp
 # MAGIC * **3 tabelas de apoio**: controle_ingestao, observabilidade_execucoes, observabilidade_guardrails
 # MAGIC
 # MAGIC ## Características
@@ -135,6 +135,34 @@ COMMENT 'BPP consolidado - Dados brutos da CVM. Append-only com versionamento.'
 
 # COMMAND ----------
 
+# DBTITLE 1,BRONZE - 104_dfc_dfp
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_BRONZE}.104_dfc_dfp (
+  CNPJ_CIA STRING,
+  DT_REFER STRING,
+  VERSAO STRING,
+  DENOM_CIA STRING,
+  CD_CVM STRING,
+  GRUPO_DFP STRING,
+  MOEDA STRING,
+  ESCALA_MOEDA STRING,
+  ORDEM_EXERC STRING,
+  DT_INI_EXERC STRING,
+  DT_FIM_EXERC STRING,
+  CD_CONTA STRING,
+  DS_CONTA STRING,
+  VL_CONTA STRING,
+  ST_CONTA_FIXA STRING,
+  _versao_ingestao INT,
+  _last_modified_cvm STRING,
+  _ingest_ts TIMESTAMP,
+  _source_file STRING
+) USING DELTA
+COMMENT 'DFC consolidada (métodos direto e indireto unidos) - Dados brutos da CVM. Append-only com versionamento.'
+""")
+
+# COMMAND ----------
+
 # DBTITLE 1,SILVER - 201_dre_dfp
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.201_dre_dfp (
@@ -229,6 +257,40 @@ CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.203_bpp_dfp (
 ) USING DELTA
 PARTITIONED BY (ANO)
 COMMENT 'BPP transformado - Dados limpos, tipados e enriquecidos. Particionada por ano.'
+""")
+
+# COMMAND ----------
+
+# DBTITLE 1,SILVER - 204_dfc_dfp
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA_SILVER}.204_dfc_dfp (
+  CNPJ_CIA STRING,
+  DT_REFER DATE,
+  VERSAO INT,
+  DENOM_CIA STRING,
+  CD_CVM INT,
+  GRUPO_DFP STRING,
+  MOEDA STRING,
+  ESCALA_MOEDA STRING,
+  ORDEM_EXERC STRING,
+  DT_INI_EXERC DATE,
+  DT_FIM_EXERC DATE,
+  CD_CONTA STRING,
+  DS_CONTA STRING,
+  VL_CONTA DOUBLE,
+  ANO INT,
+  TRIMESTRE INT,
+  MES INT,
+  DT_PROCESSAMENTO TIMESTAMP,
+  ST_CONTA_FIXA STRING,
+  NIVEL_CONTA INT,
+  CD_CONTA_PAI STRING,
+  CD_CONTA_RAIZ STRING,
+  TIPO_CONTA STRING,
+  METODO_DFC STRING
+) USING DELTA
+PARTITIONED BY (ANO)
+COMMENT 'DFC transformada - Dados limpos, tipados e enriquecidos (METODO_DFC derivado de GRUPO_DFP). Particionada por ano.'
 """)
 
 # COMMAND ----------

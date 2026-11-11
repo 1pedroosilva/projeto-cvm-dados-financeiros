@@ -1,0 +1,420 @@
+# Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
+# DBTITLE 1,Documentação
+# MAGIC %md
+# MAGIC # Ingestão de Dados Financeiros - Demonstração do Fluxo de Caixa
+# MAGIC
+# MAGIC ## Objetivo
+# MAGIC Este notebook realiza a **ingestão de dados da Demonstração do Fluxo de Caixa (DFC) consolidada** de companhias abertas brasileiras, publicados pela Comissão de Valores Mobiliários (CVM) através das Demonstrações Financeiras Padronizadas (DFP).
+# MAGIC
+# MAGIC ## Fonte dos Dados
+# MAGIC * **Órgão**: Comissão de Valores Mobiliários (CVM) - órgão regulador do mercado de capitais brasileiro
+# MAGIC * **Portal**: Dados Abertos CVM
+# MAGIC * **Documento**: Demonstrações Financeiras Padronizadas (DFP) - relatórios anuais obrigatórios
+# MAGIC * **Demonstração específica**: Demonstração do Fluxo de Caixa (DFC) - geração e aplicação de caixa consolidada
+# MAGIC
+# MAGIC ## Particularidade da DFC: dois métodos de divulgação
+# MAGIC A CVM publica a DFC em **dois arquivos por ano**:
+# MAGIC * `DFC_MD` (Método Direto) - minoritária das companhias
+# MAGIC * `DFC_MI` (Método Indireto) - majoritária das companhias
+# MAGIC
+# MAGIC Cada companhia reporta em **apenas um** dos métodos, portanto a união dos dois arquivos é completa sem duplicação. Ambos são ingeridos numa única tabela bronze (`104_dfc_dfp`); a origem de cada registro fica em `_source_file`. Em anos parciais (ex: 2026 em andamento), um dos arquivos pode estar vazio — o guardrail de arquivo vazio só PARA quando **ambas** as variantes estão vazias.
+# MAGIC
+# MAGIC ## Conteúdo
+# MAGIC * Detecção automática de anos pendentes via `inicializar_anos_processar()` (sem HTTP para CVM)
+# MAGIC * Bifurcação por CARGA: `completa` (APPEND + DELETE da versão antiga — invertido para atomicidade) vs `incremental` (idempotência via `controle_ingestao`)
+# MAGIC * Extração de arquivo ZIP da Landing Zone em memória
+# MAGIC * União das variantes MD + MI (arquivo `_con` consolidado, alinhado ao padrão dos demais demonstrativos)
+# MAGIC * Guardrails: ambas variantes vazias → PARA, schema inválido → PARA, reconciliação de contagem pós-gravação → PARA
+# MAGIC * Reconciliação em 4 pontos: extração→Spark, pós-validação de schema, pós-metadados técnicos, pós-gravação na tabela Delta
+# MAGIC * Metadados técnicos adicionados: `_versao_ingestao`, `_last_modified_cvm`, `_ingest_ts`, `_source_file`
+# MAGIC * Carga na camada bronze via APPEND-ONLY com versionamento (preserva histórico de todas as versões ingeridas)
+# MAGIC * Idempotência: verificação em `controle_ingestao` por `fonte` + `ano` + `last_modified_cvm` + `status=SUCCESS`; versionamento incremental (`MAX(_versao_ingestao) + 1`) na tabela destino
+# MAGIC * Observabilidade: `registrar_observabilidade_execucao()` registra sucesso/falha por ano; `registrar_observabilidade_job()` atualiza o MERGE no nivel do run (contexto do job capturado via `dbutils.widgets.get()`)
+# MAGIC * Processamento resiliente: try/except por ano (falha isolada não interrompe demais)
+# MAGIC
+# MAGIC ## Fontes
+# MAGIC * **Origem**: ZIP da Landing Zone (`{VOLUME_LANDING_DFP}/{ano}/dfp_cia_aberta_{ano}.zip`) - arquivo já baixado pelo notebook de verificação diária
+# MAGIC * **Metadados**: `_metadata.json` na Landing Zone (`{VOLUME_LANDING_DFP}/{ano}/`) - `last_modified_cvm` para idempotência
+# MAGIC * **Destino**: `{SCHEMA_BRONZE}.104_dfc_dfp` - dados brutos com metadados técnicos, APPEND-ONLY
+# MAGIC
+# MAGIC ## Função
+# MAGIC Camada **Bronze** - Ingestão bruta mantendo a estrutura original fornecida pela fonte oficial (CVM). O método de divulgação já está no dado bruto (`GRUPO_DFP`); a coluna derivada `METODO_DFC` é adicionada na Silver (204).
+
+# COMMAND ----------
+
+# DBTITLE 1,CARREGAR CONFIGURAÇÕES
+# MAGIC %run ../05_apoio/config_parametros
+
+# COMMAND ----------
+
+# DBTITLE 1,Inicializar Anos a Processar
+# Captura explícita do retorno com guardrail de lista vazia
+# CARGA=completa força todos os anos
+ANOS_PROCESSAR = inicializar_anos_processar()
+
+if not ANOS_PROCESSAR:
+    raise ValueError("❌ ANOS_PROCESSAR vazio - nenhum ano para processar")
+
+# COMMAND ----------
+
+# DBTITLE 1,IMPORTS
+import zipfile
+import io
+import pandas as pd
+from pyspark.sql.functions import current_timestamp, lit, year, col
+import json
+import logging
+import time
+
+# COMMAND ----------
+
+# DBTITLE 1,CONFIGURAÇÃO E PARÂMETROS
+# Configurar logging estruturado e exibir parâmetros do processamento
+# Logging estruturado permite rastreabilidade completa da execução
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+logger.info("="*80)
+logger.info("BRONZE - DFC (104) - Demonstração do Fluxo de Caixa")
+logger.info("="*80)
+logger.info(f"Anos a processar: {ANOS_PROCESSAR}")
+logger.info(f"Landing Zone: {VOLUME_LANDING_DFP}")
+logger.info(f"Total de anos: {len(ANOS_PROCESSAR)}")
+logger.info("="*80)
+
+# COMMAND ----------
+
+# DBTITLE 1,ORQUESTRAÇÃO RESILIENTE
+# Loop: Processar cada ano da lista ANOS_PROCESSAR
+# Lê arquivo ZIP da Landing Zone (já baixado por 004_verificacao_diaria_landing)
+# DFC tem DOIS arquivos por ano (MD e MI): cada companhia reporta em apenas
+# um método, então a união é completa sem duplicação
+
+# ID unico da execucao (gerado no inicio do notebook, nao dentro de funcao)
+# Passado como parametro para registrar_guardrail()
+import uuid
+id_execucao = str(uuid.uuid4())
+
+# Rastreamento de sucesso/falha
+anos_sucesso = []
+anos_falha = []
+_inicio_notebook = datetime.now()
+
+for ano in ANOS_PROCESSAR:
+    inicio = time.time()
+    logger.info(f"\n{'='*80}")
+    logger.info(f"[INÍCIO] Processando ano={ano}")
+    logger.info("="*80)
+
+    try:
+        # Caminhos
+        ano_path = f"{VOLUME_LANDING_DFP}/{ano}"
+        zip_path = f"{ano_path}/dfp_cia_aberta_{ano}.zip"
+        metadata_path = f"{ano_path}/_metadata.json"
+
+        # GUARDRAIL: Validação de pré-requisitos
+        import os
+        if not os.path.exists(zip_path):
+            raise FileNotFoundError(f"Arquivo ZIP não encontrado: {zip_path}")
+        if not os.path.exists(metadata_path):
+            raise FileNotFoundError(f"Metadados não encontrados: {metadata_path}")
+
+        # Ler metadados HTTP do arquivo
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+
+        last_modified_cvm = metadata.get('last_modified_cvm')
+
+        # BIFURCAÇÃO POR CARGA
+        if CARGA == "completa":
+            # CARGA=completa: DELETE será feito APÓS o APPEND (não antes)
+            # Motivo: DELETE+APPEND não é atômico; se compute falhar entre os dois,
+            # a tabela fica com dados ausentes. Invertendo, o pior caso é dado
+            # redundante temporário, que Silver corrige via Window Function.
+            logger.info(f"[CARGA COMPLETA] Reprocessamento - DELETE da versão antiga será feito após APPEND")
+        else:
+            # CARGA=incremental: check de idempotência
+            ja_processado = spark.sql(f"""
+                SELECT COUNT(*) as count
+                FROM {SCHEMA_APOIO}.controle_ingestao
+                WHERE fonte = 'dfc'
+                  AND ano = {ano}
+                  AND last_modified_cvm = '{last_modified_cvm}'
+                  AND status = 'SUCCESS'
+            """).collect()[0]['count']
+
+            if ja_processado > 0:
+                logger.info(f"⏭️  [SKIP] Ano {ano} já processado com esta versão CVM")
+                anos_sucesso.append(ano)
+                continue
+
+        # Buscar próxima versão de ingestão para este ano
+        versao_atual = spark.sql(f"""
+            SELECT COALESCE(MAX(_versao_ingestao), 0) + 1 as proxima_versao
+            FROM {SCHEMA_BRONZE}.104_dfc_dfp
+            WHERE year(DT_REFER) = {ano}
+        """).collect()[0]['proxima_versao']
+
+        logger.info(f"[METADADOS] Versão de ingestão: {versao_atual}")
+        logger.info(f"[METADADOS] Last-Modified CVM: {last_modified_cvm}")
+
+        # Ler ZIP diretamente da Landing Zone (Spark Connect compatível)
+        # Não usa /tmp - lê direto do /Volumes/ path com open()
+        with open(zip_path, 'rb') as f:
+            zip_bytes = io.BytesIO(f.read())
+
+        # DFC: união das variantes MD (Método Direto) e MI (Método Indireto)
+        # Variante vazia é tolerada (esperado em anos parciais); só PARA se
+        # AMBAS estiverem vazias (guardrail arquivo_vazio abaixo)
+        frames_variantes = []
+        counts_variantes = []
+
+        with zipfile.ZipFile(zip_bytes) as z:
+            nomes_disponiveis = set(z.namelist())
+
+            for variante in ['DFC_MD', 'DFC_MI']:
+                nome_csv = f"dfp_cia_aberta_{variante}_con_{ano}.csv"
+
+                if nome_csv not in nomes_disponiveis:
+                    logger.warning(f"[{variante}] arquivo ausente no ZIP - ignorando variante")
+                    continue
+
+                if z.getinfo(nome_csv).file_size == 0:
+                    logger.warning(f"[{variante}] arquivo vazio (esperado em anos parciais) - ignorando variante")
+                    continue
+
+                with z.open(nome_csv) as csv_file:
+                    df_pandas = pd.read_csv(csv_file, sep=";", encoding="ISO-8859-1")
+
+                if len(df_pandas) == 0:
+                    logger.warning(f"[{variante}] CSV sem registros - ignorando variante")
+                    continue
+
+                # RECONCILIAÇÃO: Contagem inicial da variante
+                count_extraido = len(df_pandas)
+                logger.info(f"[EXTRAÇÃO] {variante}: {count_extraido:,} registros")
+
+                # TRANSFORMAÇÃO PARA SPARK COM VERSIONAMENTO
+                df_raw = spark.createDataFrame(df_pandas)
+
+                # RECONCILIAÇÃO: Validar conversão pandas → Spark
+                count_spark = df_raw.count()
+                assert count_extraido == count_spark, f"❌ Perda na conversão ({variante}): {count_extraido} → {count_spark}"
+
+                # GUARDRAIL DE VALIDAÇÃO DE SCHEMA
+                try:
+                    df_validado = validar_e_projetar_schema(
+                        df_raw,
+                        COLUNAS_ESSENCIAIS_DFC,
+                        f"DFC {variante} {ano}"
+                    )
+                    registrar_guardrail(
+                        id_execucao=id_execucao,
+                        nome_guardrail='schema_validation',
+                        tipo_check='schema_check',
+                        resultado='PASS',
+                        etapa='bronze',
+                        fonte='dfc',
+                        ano=ano,
+                        detalhes=f'{variante}: schema validado com {len(COLUNAS_ESSENCIAIS_DFC)} colunas essenciais'
+                    )
+                except ValueError as schema_err:
+                    registrar_guardrail(
+                        id_execucao=id_execucao,
+                        nome_guardrail='schema_validation',
+                        tipo_check='schema_check',
+                        resultado='FAIL',
+                        etapa='bronze',
+                        fonte='dfc',
+                        ano=ano,
+                        detalhes=f'{variante}: {str(schema_err)[:2000]}'
+                    )
+                    raise
+
+                # Homogeneidade de tipos entre variantes e aderência ao DDL bronze
+                # (todas as colunas de negócio são STRING): a inferência do pandas
+                # pode divergir entre MD e MI (ex: VERSAO int64 vs string), o que
+                # quebraria a união e o APPEND na tabela existente
+                for coluna in COLUNAS_ESSENCIAIS_DFC:
+                    df_validado = df_validado.withColumn(coluna, col(coluna).cast("string"))
+
+                # ADICIONAR METADADOS TÉCNICOS (origem por variante em _source_file)
+                df_variante = df_validado \
+                    .withColumn("_versao_ingestao", lit(versao_atual)) \
+                    .withColumn("_last_modified_cvm", lit(last_modified_cvm)) \
+                    .withColumn("_ingest_ts", current_timestamp()) \
+                    .withColumn("_source_file", lit(nome_csv))
+
+                # RECONCILIAÇÃO: Confirmar que validação e metadados não perderam registros
+                count_validado = df_variante.count()
+                assert count_validado == count_spark, f"❌ Perda após metadados ({variante}): {count_spark} → {count_validado}"
+
+                frames_variantes.append(df_variante)
+                counts_variantes.append(count_validado)
+
+        # GUARDRAIL: Arquivo vazio - só PARA se AMBAS as variantes vazias/ausentes
+        if not frames_variantes:
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='arquivo_vazio',
+                tipo_check='empty_file',
+                resultado='FAIL',
+                etapa='bronze',
+                fonte='dfc',
+                ano=ano,
+                detalhes=f'Nenhuma variante DFC (MD/MI) com dados em dfp_cia_aberta_{ano}.zip'
+            )
+            raise ValueError(f"DFC {ano}: nenhuma variante (MD/MI) com dados")
+
+        # UNIÃO DAS VARIANTES (MD + MI)
+        df_bronze = frames_variantes[0]
+        for df_variante in frames_variantes[1:]:
+            df_bronze = df_bronze.unionByName(df_variante)
+
+        # RECONCILIAÇÃO: Confirmar volume antes de gravar
+        count_gravar = df_bronze.count()
+        count_esperado = sum(counts_variantes)
+        assert count_gravar == count_esperado, f"❌ União alterou contagem: {count_esperado} → {count_gravar}"
+        logger.info(f"[RECONCILIAÇÃO] Registros a gravar: {count_gravar:,} (MD+MI)")
+
+        # CARGA APPEND-ONLY NA BRONZE
+        df_bronze.write \
+            .format("delta") \
+            .mode("append") \
+            .saveAsTable(f"{SCHEMA_BRONZE}.104_dfc_dfp")
+
+        # CARGA=completa: DELETE da versão antiga APÓS o APPEND (invertido para atomicidade)
+        # Se falhar, fica redundante - Silver resolve via Window Function
+        if CARGA == "completa":
+            spark.sql(f"""
+                DELETE FROM {SCHEMA_BRONZE}.104_dfc_dfp
+                WHERE year(DT_REFER) = {ano}
+                  AND _last_modified_cvm = '{last_modified_cvm}'
+                  AND _versao_ingestao != {versao_atual}
+            """)
+            logger.info(f"[CARGA COMPLETA] Versão antiga (last_modified={last_modified_cvm}) removida pós-APPEND")
+
+        # GUARDRAIL: Reconciliacao de contagem
+        count_tabela = spark.table(f"{SCHEMA_BRONZE}.104_dfc_dfp") \
+            .filter(year(col("DT_REFER")) == ano) \
+            .filter(col("_versao_ingestao") == versao_atual) \
+            .count()
+
+        if count_tabela != count_gravar:
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='reconciliacao_contagem',
+                tipo_check='row_count',
+                resultado='FAIL',
+                etapa='bronze',
+                fonte='dfc',
+                ano=ano,
+                esperado=str(count_gravar),
+                encontrado=str(count_tabela),
+                registros_afetados=abs(count_gravar - count_tabela),
+                detalhes=f'Divergencia: gravados={count_gravar}, tabela={count_tabela}'
+            )
+            raise ValueError(f"Reconciliacao falhou: gravados={count_gravar}, tabela={count_tabela}")
+        else:
+            registrar_guardrail(
+                id_execucao=id_execucao,
+                nome_guardrail='reconciliacao_contagem',
+                tipo_check='row_count',
+                resultado='PASS',
+                etapa='bronze',
+                fonte='dfc',
+                ano=ano,
+                esperado=str(count_gravar),
+                encontrado=str(count_tabela),
+                detalhes=f'Contagem reconciliada: {count_gravar} registros'
+            )
+
+        logger.info(f"[GRAVAÇÃO] ✓ Ano {ano} gravado com sucesso (versão {versao_atual})")
+
+        # Registrar ingestão na tabela de controle
+        spark.sql(f"""
+            INSERT INTO {SCHEMA_APOIO}.controle_ingestao
+                (fonte, ano, arquivo, last_modified_cvm, versao_ingestao, ingest_ts, status, mensagem, id_execucao)
+            VALUES (
+                'dfc',
+                {ano},
+                'dfp_cia_aberta_{ano}.zip',
+                '{last_modified_cvm}',
+                {versao_atual},
+                current_timestamp(),
+                'SUCCESS',
+                NULL,
+                '{id_execucao}'
+            )
+        """)
+
+        duracao = time.time() - inicio
+        anos_sucesso.append(ano)
+        logger.info(f"[SUCESSO] ano={ano} | duração={duracao:.2f}s | registros={count_gravar:,}")
+
+        # Registrar observabilidade por ano
+        registrar_observabilidade_execucao(
+            id_execucao=id_execucao,
+            etapa='bronze',
+            fonte='dfc',
+            ano=ano,
+            inicio_epoch=inicio,
+            duracao_segundos=duracao,
+            status='SUCCESS',
+            registros_processados=count_gravar
+        )
+
+    except Exception as e:
+        duracao = time.time() - inicio
+        anos_falha.append((ano, str(e)))
+        logger.error(f"[FALHA] ano={ano} | duração={duracao:.2f}s | erro={str(e)}")
+
+        # Registrar observabilidade (Grupo B)
+        registrar_observabilidade_execucao(
+            id_execucao=id_execucao,
+            etapa='bronze',
+            fonte='dfc',
+            ano=ano,
+            inicio_epoch=inicio,
+            duracao_segundos=duracao,
+            status='ERROR',
+            tipo_erro=type(e).__name__,
+            mensagem_erro=str(e)
+        )
+
+# COMMAND ----------
+
+# DBTITLE 1,RELATÓRIO FINAL
+# RELATÓRIO FINAL
+logger.info(f"\n{'='*80}")
+logger.info(f"BRONZE DFC - RELATÓRIO FINAL")
+logger.info("="*80)
+logger.info(f"✓ Sucesso: {anos_sucesso}")
+if anos_falha:
+    logger.warning(f"❌ Falhas: {[ano for ano, _ in anos_falha]}")
+    for ano, erro in anos_falha:
+        logger.warning(f"   • Ano {ano}: {erro}")
+else:
+    logger.info(f"✓ Nenhuma falha")
+logger.info("="*80)
+
+# Registrar job na tabela de observabilidade (MERGE idempotente)
+registrar_observabilidade_job(
+    inicio_ts=_inicio_notebook,
+    fim_ts=datetime.now(),
+    status='ERROR' if anos_falha else 'SUCCESS',
+)
+
+# Garantir falha de job quando há períodos não processados
+if anos_falha:
+    anos_falhados = [ano for ano, _ in anos_falha]
+    raise RuntimeError(f"Falha ao processar {len(anos_falha)} ano(s): {anos_falhados}")

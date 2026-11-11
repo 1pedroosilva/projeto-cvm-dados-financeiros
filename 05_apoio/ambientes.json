@@ -1,7 +1,7 @@
 {
   "_sobre": "Resolucao de ambiente e de estrategia de carga do projeto CVM. Fonte unica: config_parametros.py le este arquivo em tempo de execucao e deriva dele todos os nomes de catalogo, schema, tabela e volume. Nenhum notebook monta nome por conta propria. Nao confundir com data contract (ODCS): este arquivo nao descreve colunas nem qualidade de dado.",
   "versao": "1.0.0",
-  "atualizado_em": "2026-09-22",
+  "atualizado_em": "2026-11-10",
 
   "ambiente": {
     "_sobre": "ONDE escrever. Eixo independente da carga.",
@@ -82,8 +82,8 @@
   "invariantes": {
     "_sobre": "O que NAO muda entre ambientes. Nome de tabela e identico nos tres: so o schema muda. Nunca criar sufixo de ambiente em nome de tabela.",
     "tabelas": {
-      "bronze": ["101_dre_dfp", "102_bpa_dfp", "103_bpp_dfp"],
-      "silver": ["201_dre_dfp", "202_bpa_dfp", "203_bpp_dfp"],
+      "bronze": ["101_dre_dfp", "102_bpa_dfp", "103_bpp_dfp", "104_dfc_dfp"],
+      "silver": ["201_dre_dfp", "202_bpa_dfp", "203_bpp_dfp", "204_dfc_dfp"],
       "apoio": ["controle_ingestao", "observabilidade_execucoes"]
     }
   },

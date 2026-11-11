@@ -299,9 +299,11 @@ FONTE_TABELA_DESTINO = {
     'dre': f"{CATALOG_NAME}.{SCHEMA_BRONZE}.101_dre_dfp",
     'bpa': f"{CATALOG_NAME}.{SCHEMA_BRONZE}.102_bpa_dfp",
     'bpp': f"{CATALOG_NAME}.{SCHEMA_BRONZE}.103_bpp_dfp",
+    'dfc': f"{CATALOG_NAME}.{SCHEMA_BRONZE}.104_dfc_dfp",
     'dre_silver': f"{CATALOG_NAME}.{SCHEMA_SILVER}.201_dre_dfp",
     'bpa_silver': f"{CATALOG_NAME}.{SCHEMA_SILVER}.202_bpa_dfp",
     'bpp_silver': f"{CATALOG_NAME}.{SCHEMA_SILVER}.203_bpp_dfp",
+    'dfc_silver': f"{CATALOG_NAME}.{SCHEMA_SILVER}.204_dfc_dfp",
 }
 
 # ============================================================================
@@ -878,6 +880,28 @@ COLUNAS_ESSENCIAIS_DRE = [
     "ST_CONTA_FIXA"
 ]
 
+COLUNAS_ESSENCIAIS_DFC = [
+    "CNPJ_CIA",
+    "DT_REFER",
+    "VERSAO",
+    "DENOM_CIA",
+    "CD_CVM",
+    "GRUPO_DFP",
+    "MOEDA",
+    "ESCALA_MOEDA",
+    "ORDEM_EXERC",
+    "DT_INI_EXERC",
+    "DT_FIM_EXERC",
+    "CD_CONTA",
+    "DS_CONTA",
+    "VL_CONTA",
+    "ST_CONTA_FIXA"
+]
+
+# DFC (fluxo de caixa) segue o mesmo schema da DRE: demonstração de período,
+# com DT_INI_EXERC e DT_FIM_EXERC. A CVM a publica em duas variantes (MD e MI)
+# que compartilham estas colunas — o bronze 104 une as duas numa única tabela.
+
 COLUNAS_ESSENCIAIS_BPA = [
     "CNPJ_CIA",
     "DT_REFER",
@@ -1022,9 +1046,11 @@ def inicializar_anos_processar(force_anos: list = None, silent: bool = False) ->
                 ('dre', 'dre'),
                 ('bpa', 'bpa'),
                 ('bpp', 'bpp'),
+                ('dfc', 'dfc'),
                 ('dre_silver', 'dre'),
                 ('bpa_silver', 'bpa'),
-                ('bpp_silver', 'bpp')
+                ('bpp_silver', 'bpp'),
+                ('dfc_silver', 'dfc')
             ]
 
             anos_consolidados = set()
