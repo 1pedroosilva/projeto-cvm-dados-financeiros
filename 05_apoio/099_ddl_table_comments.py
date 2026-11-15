@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # DBTITLE 1,DOCUMENTAÇÃO
 # MAGIC %md
 # MAGIC # Documentação de Metadados - COMMENT ON TABLE/COLUMN
@@ -9,7 +13,7 @@
 # MAGIC ## Abordagem
 # MAGIC * **Metadados de tabela**: Descrição de propósito, origem, frequência, estratégia de processamento
 # MAGIC * **Metadados de coluna**: Descrição de cada campo (significado de negócio, formato, origem)
-# MAGIC * **Cobertura**: Todas as tabelas Bronze e Silver (DRE e BPA)
+# MAGIC * **Cobertura**: Todas as tabelas Bronze e Silver (DRE, BPA, BPP e DFC)
 # MAGIC
 # MAGIC ## Estrutura
 # MAGIC Para cada tabela:
@@ -252,6 +256,87 @@ for col, desc in [
     spark.sql(f"COMMENT ON COLUMN {SCHEMA_SILVER}.203_bpp_dfp.{col} IS '{desc}'")
 
 print("✅ Tabela silver 203_bpp_dfp documentada")
+
+# COMMAND ----------
+
+# DBTITLE 1,DOCUMENTAÇÃO DA TABELA BRONZE - 104_dfc_dfp
+# Documentação da tabela bronze DFC
+spark.sql(f"""
+COMMENT ON TABLE {SCHEMA_BRONZE}.104_dfc_dfp IS 
+'Demonstração do Fluxo de Caixa (DFC) - Dados brutos extraídos do portal de Dados Abertos da CVM. 
+Une as variantes MD (método direto) e MI (método indireto) do arquivo _con em uma tabela única, mantendo a estrutura original dos arquivos DFP (Demonstrações Financeiras Padronizadas) publicados pelas companhias abertas brasileiras.
+Frequência: Anual | Fonte: Portal CVM | Processamento: APPEND incremental (com versionamento) | Metadados: _versao_ingestao, _last_modified_cvm, _ingest_ts, _source_file'
+""")
+
+# Documentação das colunas bronze DFC
+for col, desc in [
+    ('CNPJ_CIA', 'CNPJ da companhia (formato: XX.XXX.XXX/XXXX-XX)'),
+    ('DT_REFER', 'Data de referência do documento (formato: YYYY-MM-DD)'),
+    ('VERSAO', 'Versão do documento (ex: Original, Reapresentação)'),
+    ('DENOM_CIA', 'Denominação social da companhia (razão social)'),
+    ('CD_CVM', 'Código CVM da companhia (identificador único na CVM)'),
+    ('GRUPO_DFP', 'Grupo da demonstração (ex: DF Consolidado - Demonstração do Fluxo de Caixa (Método Direto/Indireto))'),
+    ('MOEDA', 'Moeda utilizada na demonstração (ex: REAL)'),
+    ('ESCALA_MOEDA', 'Escala de valores (ex: UNIDADE, MIL, MILHAO)'),
+    ('ORDEM_EXERC', 'Ordem do exercício (ex: ÚNICO, PENULTIMO)'),
+    ('DT_INI_EXERC', 'Data de início do exercício fiscal (formato: YYYY-MM-DD)'),
+    ('DT_FIM_EXERC', 'Data de fim do exercício fiscal (formato: YYYY-MM-DD)'),
+    ('CD_CONTA', 'Código da conta contábil (estrutura hierárquica com pontos)'),
+    ('DS_CONTA', 'Descrição da conta contábil conforme estrutura da DFC'),
+    ('VL_CONTA', 'Valor da conta contábil (string, cast aplicado por variante MD/MI na extração)'),
+    ('ST_CONTA_FIXA', 'Indica se a conta é fixa (S/N) - controla se a conta aparece sempre na estrutura padrão'),
+    ('_versao_ingestao', 'Versão da ingestão (incrementa a cada nova carga do mesmo arquivo)'),
+    ('_last_modified_cvm', 'Last-Modified header do arquivo na CVM (usado para detectar atualizações)'),
+    ('_ingest_ts', 'Timestamp de ingestão dos dados (metadado técnico)'),
+    ('_source_file', 'Nome do arquivo de origem da CVM (metadado técnico)')
+]:
+    spark.sql(f"COMMENT ON COLUMN {SCHEMA_BRONZE}.104_dfc_dfp.{col} IS '{desc}'")
+
+print("✅ Tabela bronze 104_dfc_dfp documentada")
+
+# COMMAND ----------
+
+# DBTITLE 1,DOCUMENTAÇÃO DA TABELA SILVER - 204_dfc_dfp
+# Documentação da tabela silver DFC
+spark.sql(f"""
+COMMENT ON TABLE {SCHEMA_SILVER}.204_dfc_dfp IS 
+'Demonstração do Fluxo de Caixa (DFC) - Dados transformados e enriquecidos. 
+Transformações aplicadas: (1) Conversão de tipos de dados, (2) Padronização de CNPJ, (3) Remoção de duplicados (chave de deduplicação inclui METODO_DFC), 
+(4) Tratamento de nulls críticos, (5) Enriquecimento com colunas temporais (ANO, TRIMESTRE, MES) e hierárquicas de conta (NIVEL_CONTA, CD_CONTA_PAI, CD_CONTA_RAIZ, TIPO_CONTA), 
+(6) Derivação de METODO_DFC a partir de GRUPO_DFP. 
+Qualidade: Dados limpos e prontos para análise | Origem: {SCHEMA_BRONZE}.104_dfc_dfp | Particionamento: ANO'
+""")
+
+# Documentação das colunas silver DFC
+for col, desc in [
+    ('CNPJ_CIA', 'CNPJ da companhia (apenas dígitos, sem formatação)'),
+    ('DT_REFER', 'Data de referência do documento (tipo DATE)'),
+    ('VERSAO', 'Versão do documento (tipo INT)'),
+    ('DENOM_CIA', 'Denominação social da companhia (razão social)'),
+    ('CD_CVM', 'Código CVM da companhia (tipo INT)'),
+    ('GRUPO_DFP', 'Grupo da demonstração (ex: DF Consolidado - Demonstração do Fluxo de Caixa (Método Direto/Indireto))'),
+    ('MOEDA', 'Moeda utilizada na demonstração (ex: REAL)'),
+    ('ESCALA_MOEDA', 'Escala de valores (ex: UNIDADE, MIL, MILHAO)'),
+    ('ORDEM_EXERC', 'Ordem do exercício (ex: ÚNICO, PENULTIMO)'),
+    ('DT_INI_EXERC', 'Data de início do exercício fiscal (tipo DATE)'),
+    ('DT_FIM_EXERC', 'Data de fim do exercício fiscal (tipo DATE)'),
+    ('CD_CONTA', 'Código da conta contábil (estrutura hierárquica com pontos)'),
+    ('DS_CONTA', 'Descrição da conta contábil conforme estrutura da DFC'),
+    ('VL_CONTA', 'Valor da conta contábil (tipo DOUBLE)'),
+    ('ST_CONTA_FIXA', 'Indica se a conta é fixa (S/N)'),
+    ('NIVEL_CONTA', 'Nível hierárquico da conta na árvore contábil (tipo INT)'),
+    ('CD_CONTA_PAI', 'Código da conta imediatamente superior na hierarquia'),
+    ('CD_CONTA_RAIZ', 'Código da conta raiz do agrupamento hierárquico'),
+    ('TIPO_CONTA', 'Classificação da conta na hierarquia (ANALITICA / TOTALIZADORA)'),
+    ('METODO_DFC', 'Método de apuração do fluxo de caixa, derivado de GRUPO_DFP (METODO_DIRETO / METODO_INDIRETO)'),
+    ('ANO', 'Ano extraído de DT_REFER (tipo INT) - Coluna de particionamento'),
+    ('TRIMESTRE', 'Trimestre extraído de DT_REFER (tipo INT, valores: 1-4)'),
+    ('MES', 'Mês extraído de DT_REFER (tipo INT, valores: 1-12)'),
+    ('DT_PROCESSAMENTO', 'Timestamp de processamento da transformação (tipo TIMESTAMP)')
+]:
+    spark.sql(f"COMMENT ON COLUMN {SCHEMA_SILVER}.204_dfc_dfp.{col} IS '{desc}'")
+
+print("✅ Tabela silver 204_dfc_dfp documentada")
 
 # COMMAND ----------
 
