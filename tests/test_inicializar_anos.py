@@ -109,9 +109,11 @@ def test_deteccao_automatica_consolida_multiplas_fontes(monkeypatch):
             "dre": [2023],
             "bpa": [2023, 2024],
             "bpp": [2025],
+            "dfc": [2024],
             "dre_silver": [2023],
             "bpa_silver": [2024],
             "bpp_silver": [2025],
+            "dfc_silver": [2023],
         }[fonte]
 
     monkeypatch.setattr(
@@ -120,7 +122,7 @@ def test_deteccao_automatica_consolida_multiplas_fontes(monkeypatch):
 
     resultado = config.inicializar_anos_processar(silent=True)
     assert resultado == [2023, 2024, 2025]
-    assert len(chamadas) == 6
+    assert len(chamadas) == 8
 
 
 # ---------------------------------------------------------------------------
